@@ -32,6 +32,8 @@ class Debugger{
         ~Debugger();
         int trace();
         int getRegs();
+        int showRegs(struct user_regs_struct regs);
+        int getOneReg(char* target);
         void dumpCode(long addr, long code);
         int getCommand();
         int loadProgram(char* program);

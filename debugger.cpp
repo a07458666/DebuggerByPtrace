@@ -37,12 +37,6 @@ Debugger::Debugger(char * script, char* program)
 
 Debugger::~Debugger(){}
 
-int Debugger::getRegs()
-{
-
-    return 0;
-}
-
 int Debugger::getCommand()
 {
     int wait_status;
@@ -96,11 +90,28 @@ int Debugger::getCommand()
             cont();
         }
     }
+    else if (strcmp("get", inputCmd) == 0 || strcmp("g", inputCmd) == 0)
+    {
+        char regName[128];
+        cin >> regName;
+        if (m_states == RunningStates)
+        {
+            getOneReg(regName);
+        }
+    }
     else if (strcmp("si", inputCmd) == 0)
     {
         if (m_states == RunningStates)
         {
             step();
+        }
+    }
+    else if (strcmp("getregs", inputCmd) == 0)
+    {
+        if (m_states == RunningStates)
+        {
+            char target[1] = "";
+            getRegs();
         }
     }
     else if (strcmp("vmmap", inputCmd) == 0)
@@ -160,12 +171,62 @@ int Debugger::step()
     return 0;
 }
 
+int Debugger::getRegs()
+{
+    struct user_regs_struct regs;
+    if(ptrace(PTRACE_GETREGS, m_child_pid, 0, &regs) != 0)
+        errquit("getRegs ptrace(PTRACE_GETREGS)");
+    showRegs(regs);
+    return 0;
+}
+
+int Debugger::showRegs(struct user_regs_struct regs)
+{
+    printf("RAX %llx\tRBX %llx\tRCX %llx\tRDX %llx\n", regs.rax, regs.rbx, regs.rcx, regs.rdx);
+    printf("R8  %llx\tR9  %llx\tR10 %llx\tR11 %llx\n", regs.r8 , regs.r9 , regs.r10, regs.r11);
+    printf("R12 %llx\tR13 %llx\tR14 %llx\tR15 %llx\n", regs.r12, regs.r13, regs.r14, regs.r15);
+    printf("RDI %llx\tRSI %llx\tRBP %llx\tRSP %llx\n", regs.rdi, regs.rsi, regs.rbp, regs.rsp);
+    printf("RIP %llx\tFLAGS %016llx\n", regs.rip, regs.eflags);
+    return 0;
+}
+
+int Debugger::getOneReg(char* target)
+{   
+    printf("target %s\n", target);
+    struct user_regs_struct regs;
+    if(ptrace(PTRACE_GETREGS, m_child_pid, 0, &regs) != 0)
+        errquit("getOneReg ptrace(PTRACE_GETREGS)");
+    if (strcmp("rip", target) == 0) printf("rip = %lld (0x%llx)\n", regs.rip, regs.rip);
+    else if (strcmp("flags", target) == 0) printf("flags = %lld (0x%llx)\n", regs.eflags, regs.eflags);
+    
+    else if (strcmp("rax", target) == 0) printf("rax = %lld (0x%llx)\n", regs.rax, regs.rax);
+    else if (strcmp("rbx", target) == 0) printf("rbx = %lld (0x%llx)\n", regs.rbx, regs.rbx);
+    else if (strcmp("rcx", target) == 0) printf("rcx = %lld (0x%llx)\n", regs.rcx, regs.rcx);
+    else if (strcmp("rdx", target) == 0) printf("rdx = %lld (0x%llx)\n", regs.rdx, regs.rdx);
+
+    else if (strcmp("r8", target) == 0) printf("r8 = %lld (0x%llx)\n", regs.r8, regs.r8);
+    else if (strcmp("r9", target) == 0) printf("r9 = %lld (0x%llx)\n", regs.r9, regs.r9);
+    else if (strcmp("r10", target) == 0) printf("r10 = %lld (0x%llx)\n", regs.r10, regs.r10);
+    else if (strcmp("r11", target) == 0) printf("r11 = %lld (0x%llx)\n", regs.r11, regs.r11);
+
+    else if (strcmp("r12", target) == 0) printf("r12 = %lld (0x%llx)\n", regs.r12, regs.r12);
+    else if (strcmp("r13", target) == 0) printf("r13 = %lld (0x%llx)\n", regs.r13, regs.r13);
+    else if (strcmp("r14", target) == 0) printf("r14 = %lld (0x%llx)\n", regs.r14, regs.r14);
+    else if (strcmp("r15", target) == 0) printf("r15 = %lld (0x%llx)\n", regs.r15, regs.r15);
+
+    else if (strcmp("rdi", target) == 0) printf("rdi = %lld (0x%llx)\n", regs.rdi, regs.rdi);
+    else if (strcmp("rsi", target) == 0) printf("rsi = %lld (0x%llx)\n", regs.rsi, regs.rsi);
+    else if (strcmp("rbp", target) == 0) printf("rbp = %lld (0x%llx)\n", regs.rbp, regs.rbp);
+    else if (strcmp("rsp", target) == 0) printf("rsp = %lld (0x%llx)\n", regs.rsp, regs.rsp);
+    return 0;
+}
 
 int Debugger::setBreakPoint()
 {
     /* set break point */
     // if(ptrace(PTRACE_POKETEXT, m_child_pid, target, (code & 0xffffffffffffff00) | 0xcc) != 0) 
     //     errquit("** setBreakPoint ptrace(POKETEXT)");
+    return 0;
 }
 
 int Debugger::loadProgram(char* program)

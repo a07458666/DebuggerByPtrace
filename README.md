@@ -26,8 +26,6 @@ break
 delete
 disasm addr
 dump addr
-get reg
-getregs
 list
 set reg val
 ```

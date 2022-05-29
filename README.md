@@ -19,3 +19,15 @@
 - si: step into instruction
 - start: start the program and stop at the first instruction
 ```
+
+TODO:
+```bash
+break
+delete
+disasm addr
+dump addr
+get reg
+getregs
+list
+set reg val
+```

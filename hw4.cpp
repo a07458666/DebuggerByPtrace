@@ -36,9 +36,15 @@ int main(int argc, char* argv[])
     char script[128] = "";
     char program[128] = "";
     int err = getOptScript(argc, argv, script, program);
-    printf("-s script =  %s\n", script);
-    printf("program =  %s\n", program);
+    // printf("**-s script =  %s\n", script);
+    // printf("**program =  %s\n", program);
     if (err == -1) return err;
-    Debugger debugger = Debugger();
+    
+    long offset = 0x9cc; // the default value we reverse engineered
+	offset = strtol(program, NULL, 0);
+	fprintf(stderr, "## offset = %ld (0x%lx)\n", offset, offset);
+
+    Debugger debugger = Debugger(script, program);
+    debugger.run();
     return 0;
 }

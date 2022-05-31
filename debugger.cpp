@@ -207,10 +207,14 @@ int Debugger::doCommand(std::vector<std::string> *cmds)
             char* addr = (char *)cmds->at(1).c_str();
             reg_t addr_val = convertStrToNumber(addr);
             unsigned long offect = 0;
-            for (unsigned long i = 0; i < 50; ++i)
+            for (unsigned long i = 0; i < MAX_DUMP_INSTRUCTIONS; ++i)
             {
                 unsigned long ret = disassemble(m_child_pid, addr_val + offect);
                 offect += ret;
+                if (offect >= m_sh_table.sh_size){
+                    fprintf(stdout, "** the address is out of the range of the text segment\n");
+                    break;
+                }
             }
             
         }
@@ -562,19 +566,37 @@ int Debugger::runByScript()
 
 int Debugger::readELF(char* program)
 {
-    int fd;
-    ElfN_Ehdr f_header;
-    fd = open(program, S_IRUSR);
-   if (fd < 0) {
-      printf("\nfile open error\n");
-      return -1;
-   }
+    FILE * pFile = NULL;
+    pFile = fopen(program, "r");
+    if (pFile == NULL) errquit("** fopen");
 
-   /* Read ELF Header */
-   read(fd, &f_header, sizeof(ElfN_Ehdr));
-   printf("** 0x%lx\n", f_header.e_entry);
-   m_f_header = f_header;
-   fprintf(stdout, "** program '%s' loaded. entry point 0x%lx\n", program, m_f_header.e_entry);
+    fseek(pFile, 0, SEEK_SET);
+    fread(&m_elf_header, 1, sizeof(ElfN_Ehdr), pFile);
+    fprintf(stdout, "** program '%s' loaded. entry point 0x%lx\n", program, m_elf_header.e_entry);
+    fseek(pFile, m_elf_header.e_shoff + m_elf_header.e_shstrndx * sizeof(ElfN_Shdr), SEEK_SET);
+    fread(&m_sh_table, 1, sizeof(ElfN_Shdr), pFile);
+    
+    char SectNames[MAX_BUF_SIZE] = "";
+    fseek(pFile, m_sh_table.sh_offset, SEEK_SET);
+    fread(SectNames, 1, m_sh_table.sh_size, pFile);
+
+    for (int idx = 0; idx < m_elf_header.e_shnum; idx++)
+    {
+        const char* name = "";
+        
+        fseek(pFile, m_elf_header.e_shoff + idx * sizeof(ElfN_Shdr), SEEK_SET);
+        fread(&m_sh_table, 1, sizeof(ElfN_Shdr), pFile);
+
+        // print section name
+        if (m_sh_table.sh_name){
+            name = SectNames + m_sh_table.sh_name;
+            if (strcmp(".text", name) == 0)
+            {
+                fprintf(stdout, "** section idx = %2u name = '%s' size 0x%lx\n", idx, name, m_sh_table.sh_size);
+                break;
+            }
+        }
+    }
    setStates(LoadedStates);
    return 0;
 }

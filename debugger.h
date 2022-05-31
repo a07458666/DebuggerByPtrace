@@ -9,7 +9,10 @@
 #define BASE 16
 #define MAX_BUF_SIZE 256
 #define ERR -1
+#define MAX_DUMP_INSTRUCTIONS 10
 #define ElfN_Ehdr Elf64_Ehdr
+#define ElfN_Shdr Elf64_Shdr
+
 #define GETPOSE printf("** file %s, line %d\n", __FILE__, __LINE__);
 typedef unsigned long reg_t;
 typedef struct range_s {
@@ -38,8 +41,8 @@ class Debugger{
         int m_wait_status;
         reg_t m_start_point;
         std::map<reg_t, reg_t> break_points;
-        ElfN_Ehdr m_f_header;
-
+        ElfN_Ehdr m_elf_header;
+        ElfN_Shdr m_sh_table;
         int getReg(struct user_regs_struct *regs);
         int getRegs();
         int showRegs(struct user_regs_struct regs);

@@ -40,7 +40,7 @@ print_instruction(long long addr, instruction1 *in) {
 }
 
 unsigned long
-disassemble(pid_t proc, unsigned long long rip) {
+disassemble(pid_t proc, unsigned long long rip, bool isPrint) {
 	int count;
 	char buf[64] = { 0 };
 	unsigned long long ptr = rip;
@@ -48,7 +48,7 @@ disassemble(pid_t proc, unsigned long long rip) {
 	map<long long, instruction1>::iterator mi; // from memory addr to instruction
 
 	if((mi = instructions.find(rip)) != instructions.end()) {
-		print_instruction(rip, &mi->second);
+		if (isPrint) print_instruction(rip, &mi->second);
         return mi->second.size;
 	}
     
@@ -60,7 +60,7 @@ disassemble(pid_t proc, unsigned long long rip) {
 		memcpy(&buf[ptr-rip], &peek, PEEKSIZE);
 	}
 	if(ptr == rip)  {
-		print_instruction(rip, NULL);
+		if (isPrint) print_instruction(rip, NULL);
 		return 0;
 	}
     
@@ -80,10 +80,10 @@ disassemble(pid_t proc, unsigned long long rip) {
 	}
     
 	if((mi = instructions.find(rip)) != instructions.end()) {
-		print_instruction(rip, &mi->second);
+		if (isPrint) print_instruction(rip, &mi->second);
         return mi->second.size;
 	} else {
-		print_instruction(rip, NULL);
+		if (isPrint) print_instruction(rip, NULL);
         return 0;
 	}
     

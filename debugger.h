@@ -39,8 +39,7 @@ class Debugger{
         char *m_program;
         char *m_script;
         int m_wait_status;
-        reg_t m_start_point;
-        std::map<reg_t, reg_t> break_points;
+        std::map<reg_t, reg_t> m_break_points;
         ElfN_Ehdr m_elf_header;
         ElfN_Shdr m_sh_table;
         int getReg(struct user_regs_struct *regs);
@@ -51,7 +50,8 @@ class Debugger{
         int dumpCode(long code, char* msg);
         int doCommand(std::vector<std::string> *cmds);
         int loadProgram(char* program);
-
+        int list();
+        int deleteBreak(reg_t break_point);
         int cont();
         int step();
         int setBreakPoint(reg_t break_point);
@@ -63,6 +63,9 @@ class Debugger{
         int readELF(char* program);
         States setStates(States newStates);
         States getStates();
+        int recoverBeackPoint();
+        int disasm(int instructionsCount, reg_t addr);
+        int preloadDisasm();
     public:
         Debugger(char * script, char* program);
         ~Debugger();

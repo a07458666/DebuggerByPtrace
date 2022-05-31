@@ -34,7 +34,6 @@ Debugger::Debugger(char * script, char* program)
     m_states = NotLoadedStates;
     m_program = program;
     m_script = script;
-    m_start_point = 0;
     if (strcmp(program, "") != 0) 
     {
         if (readELF(program) != 0) errquit("** readELF");
@@ -72,7 +71,7 @@ int Debugger::doCommand(std::vector<std::string> *cmds)
     {
         if (getStates() == LoadedStates)
         {
-            printf("** pid %d\n", m_child_pid);
+            // printf("** pid %d\n", m_child_pid);
             if (loadProgram(m_program) != 0) errquit("**loadProgram");
         }
         else
@@ -166,6 +165,28 @@ int Debugger::doCommand(std::vector<std::string> *cmds)
             printf("** states must be RunningStates\n");
         }
     }
+    else if (strcmp("list", cmd) == 0)
+    {
+        list();
+    }
+    else if (strcmp("delete", cmd) == 0)
+    {
+        if (getStates() == RunningStates)
+        {
+            if (cmds->size() < 2) 
+            {
+                printf("** no address is given\n");
+                return 0;
+            }
+            char* break_point = (char *)cmds->at(1).c_str();
+            reg_t break_val = convertStrToNumber(break_point);
+            deleteBreak(break_val);
+        }
+        else
+        {
+            printf("** states must be RunningStates\n");
+        }
+    }
     else if (strcmp("vmmap", cmd) == 0 || strcmp("m", cmd) == 0)
     {
         if (getStates() == RunningStates)
@@ -206,17 +227,7 @@ int Debugger::doCommand(std::vector<std::string> *cmds)
             }
             char* addr = (char *)cmds->at(1).c_str();
             reg_t addr_val = convertStrToNumber(addr);
-            unsigned long offect = 0;
-            for (unsigned long i = 0; i < MAX_DUMP_INSTRUCTIONS; ++i)
-            {
-                unsigned long ret = disassemble(m_child_pid, addr_val + offect);
-                offect += ret;
-                if (offect >= m_sh_table.sh_size){
-                    fprintf(stdout, "** the address is out of the range of the text segment\n");
-                    break;
-                }
-            }
-            
+            int ret = disasm(MAX_DUMP_INSTRUCTIONS, addr_val);
         }
         else
         {
@@ -254,6 +265,19 @@ int Debugger::step()
 {
     if (ptrace(PTRACE_SINGLESTEP, m_child_pid, 0, 0) < 0) errquit("** ptrace@STEP");
     if (waitpid(m_child_pid, &m_wait_status, 0) < 0) errquit("** setp");
+    return 0;
+}
+
+// cmd list (list all beack point)
+int Debugger::list()
+{
+    int count = 0;
+    for( map<reg_t,reg_t>::iterator iter=m_break_points.begin(); iter!=m_break_points.end(); ++iter)  
+    {  
+        auto beackAddr = (*iter).first;
+        printf("\t%d: %lx\n",count, beackAddr);
+        count++;
+    }  
     return 0;
 }
 
@@ -389,6 +413,8 @@ int Debugger::loadProgram(char* program)
         if(waitpid(m_child_pid, &m_wait_status, 0) < 0) errquit("** waitpid");
         ptrace(PTRACE_SETOPTIONS, m_child_pid, 0, PTRACE_O_EXITKILL);
     }
+    recoverBeackPoint();
+    preloadDisasm();
     setStates(RunningStates);
     return 0;
 }
@@ -460,8 +486,15 @@ int Debugger::dumpCode(long code, char *msg) {
 int Debugger::setBreakPoint(reg_t break_point)
 {
     char msgCode[MAX_BUF_SIZE];
+
+    if (m_break_points.find(break_point) != m_break_points.end())
+    {
+        printf("** the breakpoint is already exists.\n");
+        return 0;
+    }
+
     reg_t code;
-    fprintf(stderr, "** start_point = 0x%zx, break_point = 0x%zx.\n", m_start_point, break_point);
+    // fprintf(stderr, "** entry point = 0x%zx, break point = 0x%zx.\n", m_elf_header.e_entry, break_point);
     /* get original text: 48 39 d0 */
     code = ptrace(PTRACE_PEEKTEXT, m_child_pid, break_point, 0);
 
@@ -469,7 +502,21 @@ int Debugger::setBreakPoint(reg_t break_point)
     /* set break point */
     if(ptrace(PTRACE_POKETEXT, m_child_pid, break_point, (code & 0xffffffffffffff00) | 0xcc) != 0)
         errquit("** setBreak ptrace(POKETEXT)");
-    break_points[break_point] = code;
+    m_break_points[break_point] = code;
+    return 0;
+}
+
+int Debugger::deleteBreak(reg_t break_point)
+{
+    if (m_break_points.find(break_point) == m_break_points.end())
+    {
+        printf("** not find breakpoint(%lx).\n", break_point);
+        return 0;
+    }
+    /* restore break point */
+    if(ptrace(PTRACE_POKETEXT, m_child_pid, break_point, m_break_points[break_point]) != 0)
+        errquit("ptrace(POKETEXT)");
+    m_break_points.erase(break_point);
     return 0;
 }
 
@@ -486,8 +533,8 @@ int Debugger::checkProgramState()
         struct user_regs_struct regs;
         getReg(&regs);
         map<reg_t, reg_t>::iterator iter;
-        iter = break_points.find(regs.rip-1);
-        if(iter != break_points.end()){
+        iter = m_break_points.find(regs.rip-1);
+        if(iter != m_break_points.end()){
             reg_t target, code;
             target = iter->first;
             code = iter->second;
@@ -601,6 +648,16 @@ int Debugger::readELF(char* program)
    return 0;
 }
 
+int Debugger::recoverBeackPoint()
+{
+    for( map<reg_t,reg_t>::iterator iter=m_break_points.begin(); iter!=m_break_points.end(); ++iter)  
+    {  
+        auto beackAddr = (*iter).first;
+        setBreakPoint(beackAddr);
+    } 
+    return 0;
+}
+
 States Debugger::setStates(States newStates)
 {
     States oldStates = m_states;
@@ -611,4 +668,36 @@ States Debugger::setStates(States newStates)
 States Debugger::getStates()
 {
     return m_states;
+}
+
+int Debugger::disasm(int instructionsCount, reg_t addr)
+{
+    unsigned long offect = 0;
+    if (addr < m_elf_header.e_entry)
+    {
+        fprintf(stdout, "** the address is out of the range of the text segment\n");
+        return 0;
+    }
+    for (unsigned long i = 0; i < MAX_DUMP_INSTRUCTIONS; ++i)
+    {
+        unsigned long ret = disassemble(m_child_pid, addr + offect, true);
+        offect += ret;
+        if (offect >= m_sh_table.sh_size){
+            fprintf(stdout, "** the address is out of the range of the text segment\n");
+            break;
+        }
+    }   
+    return 0;
+}
+
+int Debugger::preloadDisasm ()
+{
+    unsigned long offect = 0;
+    if (m_sh_table.sh_size < 0) errquit("** preloadDisasm");
+    while (offect < m_sh_table.sh_size)
+    {
+        unsigned long ret = disassemble(m_child_pid, m_elf_header.e_entry + offect, false);
+        offect += ret;
+    }   
+    return 0;
 }

@@ -21,6 +21,6 @@ static map<long long, instruction1> instructions;
 int init();
 int closeHandle();
 void print_instruction(long long addr, instruction1 *in);
-unsigned long disassemble(pid_t proc, unsigned long long rip);
+unsigned long disassemble(pid_t proc, unsigned long long rip, bool isPrint);
 
 #endif //__DUMP_CODE_H__

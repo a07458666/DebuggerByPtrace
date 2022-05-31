@@ -5,6 +5,7 @@
 #include <cstring>
 #include <getopt.h>
 
+#include <elf.h>
 #include "debugger.h"
 
 int getOptScript(int argc, char* argv[], char* script, char* program)
@@ -40,11 +41,14 @@ int main(int argc, char* argv[])
     // printf("**program =  %s\n", program);
     if (err == -1) return err;
     
-    long offset = 0x9cc; // the default value we reverse engineered
-	offset = strtol(program, NULL, 0);
-	fprintf(stderr, "## offset = %ld (0x%lx)\n", offset, offset);
-
     Debugger debugger = Debugger(script, program);
-    debugger.run();
+    if (strcmp(script, "") == 0)
+    {
+        debugger.runByStdin();
+    }
+    else
+    {
+        debugger.runByScript();
+    }
     return 0;
 }

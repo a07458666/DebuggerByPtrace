@@ -22,10 +22,9 @@
 
 TODO:
 ```bash
-break
+break 還沒完成
 delete
 disasm addr
 dump addr
 list
-set reg val
 ```

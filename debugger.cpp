@@ -5,9 +5,14 @@
 #include <sys/wait.h>
 #include <sys/user.h>
 #include <iostream>
-#include <map>
 #include <cstring>
 
+// elf
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+
+#include "dumpCode.h"
 #include "debugger.h"
 
 using namespace std;
@@ -28,146 +33,223 @@ Debugger::Debugger(char * script, char* program)
 {
     m_states = NotLoadedStates;
     m_program = program;
+    m_script = script;
+    m_start_point = 0;
     if (strcmp(program, "") != 0) 
     {
-        int ret = loadProgram(program);
-        if (ret != 0) errquit("**loadProgram");
+        if (readELF(program) != 0) errquit("** readELF");
     }
+    if (init() != 0) errquit("** cshandle");
 }
 
-Debugger::~Debugger(){}
+Debugger::~Debugger(){
+    closeHandle();
+}
 
-int Debugger::getCommand()
+int Debugger::doCommand(std::vector<std::string> *cmds)
 {
-    int wait_status;
-    char inputCmd[128];
     int ret = 0;
-
-    cout << "sdb>";
-    cin >> inputCmd;
-
-    if (strcmp("load", inputCmd) == 0)
+    if (cmds->size() == 0) return 0;
+    char* cmd = (char *)cmds->at(0).c_str();
+    if (strcmp("load", cmd) == 0)
     {   
-        char program[128];
-        cin >> program;
-        if(m_states == NotLoadedStates)
+        if(getStates() == NotLoadedStates)
         {
-            int ret = loadProgram(program);
-            if (ret != 0) errquit("**loadProgram");
-            m_states = LoadedStates;
+            if (cmds->size() < 2) 
+            {
+                printf("** no file is given\n");
+                return 0;
+            }
+            m_program = (char*)cmds->at(1).c_str();
+            if (readELF(m_program) != 0) errquit("** readELF");
         }
         else
         {
-            printf("**states is loaded\n");
+            printf("**states must be NotLoadedStates\n");
         }
     }
-    else if (strcmp("start", inputCmd) == 0)
+    else if (strcmp("start", cmd) == 0)
     {
-        if (m_states == LoadedStates)
+        if (getStates() == LoadedStates)
         {
             printf("** pid %d\n", m_child_pid);
-            m_states = RunningStates;
+            if (loadProgram(m_program) != 0) errquit("**loadProgram");
+        }
+        else
+        {
+            printf("** states must be LoadedStates\n");
         }
     }
-    else if (strcmp("run", inputCmd) == 0 || strcmp("r", inputCmd) == 0)
+    else if (strcmp("run", cmd) == 0 || strcmp("r", cmd) == 0)
     {
-        if (m_states == RunningStates)
+        if (getStates() == RunningStates)
         {
             printf("** program %s is already running\n", m_program);
-            m_states = RunningStates;
             cont();
         }
-        else if (m_states == LoadedStates)
+        else if (getStates() == LoadedStates)
         {
-            printf("** run program %s\n", m_program);
+            printf("** run program '%s'\n", m_program);
+            if (loadProgram(m_program) != 0) errquit("**loadProgram");
             cont();
         }
-    }
-    else if (strcmp("cont", inputCmd) == 0 || strcmp("c", inputCmd) == 0)
-    {
-        if (m_states == RunningStates)
+        else
         {
-            cont();
+            printf("** states must be RunningStates or LoadedStates\n");
         }
     }
-    else if (strcmp("get", inputCmd) == 0 || strcmp("g", inputCmd) == 0)
+    else if (strcmp("cont", cmd) == 0 || strcmp("c", cmd) == 0)
     {
-        char regName[128];
-        cin >> regName;
-        if (m_states == RunningStates)
+        if (getStates() == RunningStates)
         {
+            cont();
+        }
+        else
+        {
+            printf("** states must be RunningStates\n");
+        }
+    }
+    else if (strcmp("get", cmd) == 0 || strcmp("g", cmd) == 0)
+    {
+        if (getStates() == RunningStates)
+        {
+            if (cmds->size() < 2) 
+            {
+                printf("** no regName is given\n");
+                return 0;
+            }
+            char* regName = (char *)cmds->at(1).c_str();
             getOneReg(regName);
         }
+        else
+        {
+            printf("** states must be RunningStates\n");
+        }
     }
-    else if (strcmp("si", inputCmd) == 0)
+    else if (strcmp("set", cmd) == 0 || strcmp("s", cmd) == 0)
     {
-        if (m_states == RunningStates)
+        if (getStates() == RunningStates)
+        {   
+            if (cmds->size() < 3) 
+            {
+                printf("** no regName or regVal\n");
+                return 0;
+            }
+            char* regName = (char *)cmds->at(1).c_str();
+            char* regVal = (char *)cmds->at(2).c_str();
+            setReg(regName,  regVal);
+        }
+        else
+        {
+            printf("** states must be RunningStates\n");
+        }
+    }
+    else if (strcmp("getregs", cmd) == 0)
+    {
+        if (getStates() == RunningStates)
+        {
+            getRegs();
+        }
+        else
+        {
+            printf("** states must be RunningStates\n");
+        }
+    }
+    else if (strcmp("si", cmd) == 0)
+    {
+        if (getStates() == RunningStates)
         {
             step();
         }
-    }
-    else if (strcmp("getregs", inputCmd) == 0)
-    {
-        if (m_states == RunningStates)
+        else
         {
-            char target[1] = "";
-            getRegs();
+            printf("** states must be RunningStates\n");
         }
     }
-    else if (strcmp("vmmap", inputCmd) == 0)
+    else if (strcmp("vmmap", cmd) == 0 || strcmp("m", cmd) == 0)
     {
-        if (m_states == RunningStates)
+        if (getStates() == RunningStates)
         {
             if(show_vmmap() < 0) errquit("** show_vmmap");
         }
+        else
+        {
+            printf("** states must be RunningStates\n");
+        }
     }
-    else if (strcmp("exit", inputCmd) == 0 || strcmp("q", inputCmd) == 0)
+    else if (strcmp("break", cmd) == 0 || strcmp("b", cmd) == 0)
+    {
+        if (getStates() == RunningStates)
+        {
+            if (cmds->size() < 2) 
+            {
+                printf("** no address is given\n");
+                return 0;
+            }
+            char* break_point = (char *)cmds->at(1).c_str();
+            reg_t break_val = convertStrToNumber(break_point);
+            setBreakPoint(break_val);
+        }
+        else
+        {
+            printf("** states must be RunningStates\n");
+        }
+    }
+    else if (strcmp("disasm", cmd) == 0 || strcmp("d", cmd) == 0)
+    {   
+        if (getStates() == RunningStates)
+        {
+            if (cmds->size() < 2) 
+            {
+                printf("** no address is given\n");
+                return 0;
+            }
+            char* addr = (char *)cmds->at(1).c_str();
+            reg_t addr_val = convertStrToNumber(addr);
+            unsigned long offect = 0;
+            for (unsigned long i = 0; i < 50; ++i)
+            {
+                unsigned long ret = disassemble(m_child_pid, addr_val + offect);
+                offect += ret;
+            }
+            
+        }
+        else
+        {
+            printf("** states must be RunningStates\n");
+        }
+        
+    }
+    else if (strcmp("exit", cmd) == 0 || strcmp("q", cmd) == 0)
     {
         printf("**exit\n");
         ret = -1;
     }
-    else if(strcmp("help", inputCmd) == 0 || strcmp("h", inputCmd) == 0)
+    else if(strcmp("help", cmd) == 0 || strcmp("h", cmd) == 0)
     {
         printf(HELP_MGS);
     }
     else
     {
-        printf("**not define cmd %s\n", inputCmd);
+        printf("**not define cmd %s\n", cmd);
     }
+    if (getStates() == RunningStates) checkProgramState();
     return ret;
 }
 
 int Debugger::cont()
 {
-    int wait_status;
     if(ptrace(PTRACE_CONT, m_child_pid,0 ,0) < 0) errquit("**ptrace@cont");
-    if(waitpid(m_child_pid, &wait_status, 0) < 0) errquit("**waitpid");
-}
-
-int Debugger::trace()
-{
-    int wait_status;
-    unsigned long baseaddr, target, code;
-    map<range_t, map_entry_t> vmmap;
-    map<range_t, map_entry_t>::iterator vi;
-
-    if(waitpid(m_child_pid, &wait_status, 0) < 0) errquit("**waitpid");
-    while (WIFSTOPPED(wait_status) > 0)
-    {   
-        struct user_regs_struct regs;
-        // getCommand();
-        if (ptrace(PTRACE_SINGLESTEP, m_child_pid, 0, 0) < 0) errquit("** ptrace@STEP");
-        if (waitpid(m_child_pid, &wait_status, 0) < 0) errquit("** waitpid@child_pid");
-    }
+    if(waitpid(m_child_pid, &m_wait_status, 0) < 0) errquit("**waitpid");
+    setStates(RunningStates);
     return 0;
 }
 
 // cmd si
 int Debugger::step()
 {
-    int wait_status;
     if (ptrace(PTRACE_SINGLESTEP, m_child_pid, 0, 0) < 0) errquit("** ptrace@STEP");
-    if (waitpid(m_child_pid, &wait_status, 0) < 0) errquit("** setp");
+    if (waitpid(m_child_pid, &m_wait_status, 0) < 0) errquit("** setp");
     return 0;
 }
 
@@ -190,12 +272,19 @@ int Debugger::showRegs(struct user_regs_struct regs)
     return 0;
 }
 
+int Debugger::getReg(struct user_regs_struct *regs)
+{
+    if(ptrace(PTRACE_GETREGS, m_child_pid, 0, regs) != 0)
+        errquit("** getOneReg ptrace(PTRACE_GETREGS)");
+    return 0;
+}
+
 int Debugger::getOneReg(char* target)
 {   
-    printf("target %s\n", target);
+    // printf("target %s\n", target);
     struct user_regs_struct regs;
-    if(ptrace(PTRACE_GETREGS, m_child_pid, 0, &regs) != 0)
-        errquit("getOneReg ptrace(PTRACE_GETREGS)");
+    getReg(&regs);
+    
     if (strcmp("rip", target) == 0) printf("rip = %lld (0x%llx)\n", regs.rip, regs.rip);
     else if (strcmp("flags", target) == 0) printf("flags = %lld (0x%llx)\n", regs.eflags, regs.eflags);
     
@@ -218,14 +307,51 @@ int Debugger::getOneReg(char* target)
     else if (strcmp("rsi", target) == 0) printf("rsi = %lld (0x%llx)\n", regs.rsi, regs.rsi);
     else if (strcmp("rbp", target) == 0) printf("rbp = %lld (0x%llx)\n", regs.rbp, regs.rbp);
     else if (strcmp("rsp", target) == 0) printf("rsp = %lld (0x%llx)\n", regs.rsp, regs.rsp);
+    else printf("** not find %s reg\n", target);
     return 0;
 }
 
-int Debugger::setBreakPoint()
+reg_t Debugger::convertStrToNumber(char* val)
 {
-    /* set break point */
-    // if(ptrace(PTRACE_POKETEXT, m_child_pid, target, (code & 0xffffffffffffff00) | 0xcc) != 0) 
-    //     errquit("** setBreakPoint ptrace(POKETEXT)");
+    reg_t ul;
+    char *stopstring;                                                   
+    ul = strtoul(val, &stopstring, BASE);
+    // printf("   strtoul = %lld (base %d)\n", ul, BASE);                            
+    // printf("   Stopped scan at %s\n\n", stopstring);  
+    return ul;  
+}
+
+int Debugger::setReg(char* target, char* valStr)
+{
+    struct user_regs_struct regs;
+    if(ptrace(PTRACE_GETREGS, m_child_pid, 0, &regs) != 0)
+        errquit("getRegs ptrace(PTRACE_GETREGS)");
+    reg_t val = convertStrToNumber(valStr);
+    if (strcmp("rip", target) == 0) regs.rip = val;
+    else if (strcmp("flags", target) == 0) regs.eflags = val;
+    
+    else if (strcmp("rax", target) == 0) regs.rax = val;
+    else if (strcmp("rbx", target) == 0) regs.rbx = val;
+    else if (strcmp("rcx", target) == 0) regs.rcx = val;
+    else if (strcmp("rdx", target) == 0) regs.rdx = val;
+
+    else if (strcmp("r8", target) == 0) regs.r8 = val;
+    else if (strcmp("r9", target) == 0) regs.r9 = val;
+    else if (strcmp("r10", target) == 0) regs.r10 = val;
+    else if (strcmp("r11", target) == 0) regs.r11 = val;
+
+    else if (strcmp("r12", target) == 0) regs.r12 = val;
+    else if (strcmp("r13", target) == 0) regs.r13 = val;
+    else if (strcmp("r14", target) == 0) regs.r14 = val;
+    else if (strcmp("r15", target) == 0) regs.r15 = val;
+
+    else if (strcmp("rdi", target) == 0) regs.rdi = val;
+    else if (strcmp("rsi", target) == 0) regs.rsi = val;
+    else if (strcmp("rbp", target) == 0) regs.rbp = val;
+    else if (strcmp("rsp", target) == 0) regs.rsp = val;
+    else printf("** not find %s reg\n", target);
+    
+    if(ptrace(PTRACE_SETREGS, m_child_pid, 0, &regs) != 0) errquit("ptrace(SETREGS)");
     return 0;
 }
 
@@ -234,53 +360,38 @@ int Debugger::loadProgram(char* program)
     char * const argv[] = {NULL};
     pid_t parant_pid = getpid();
     pid_t child_pid;
-    int wait_status;
-    printf("**[trace] program = %s\n", program);
     if (program == NULL)
         return -1;
     
     if ((child_pid = fork()) < 0)
     {
-        perror("**fork");
+        perror("** fork");
         exit(1);
     }
     // child
     if(child_pid == 0)
     {
-        printf("**child pid %d\n", getpid());
-        if (ptrace(PTRACE_TRACEME, 0, 0, 0) < 0) errquit("**ptrace@child PTRACE_TRACEME");
+        // printf("** child pid %d\n", getpid());
+        if (ptrace(PTRACE_TRACEME, 0, 0, 0) < 0) errquit("** ptrace@child PTRACE_TRACEME");
         execvp(program, argv);
-        perror("**execvp");
+        perror("** execvp");
         exit(1); 
     }
     //parant
     else
     {
-        printf("**parant pid %d, child pid %d\n", getpid(), child_pid);
+        printf("** parant pid %d, child pid %d\n", getpid(), child_pid);
         m_child_pid = child_pid;
-        if(waitpid(m_child_pid, &wait_status, 0) < 0) errquit("**waitpid");
+        if(waitpid(m_child_pid, &m_wait_status, 0) < 0) errquit("** waitpid");
         ptrace(PTRACE_SETOPTIONS, m_child_pid, 0, PTRACE_O_EXITKILL);
     }
-    m_states = LoadedStates;
+    setStates(RunningStates);
     return 0;
-}
-
-void Debugger::dumpCode(long addr, long code) {
-	fprintf(stderr, "## %lx: code = %02x %02x %02x %02x %02x %02x %02x %02x\n",
-		addr,
-		((unsigned char *) (&code))[0],
-		((unsigned char *) (&code))[1],
-		((unsigned char *) (&code))[2],
-		((unsigned char *) (&code))[3],
-		((unsigned char *) (&code))[4],
-		((unsigned char *) (&code))[5],
-		((unsigned char *) (&code))[6],
-		((unsigned char *) (&code))[7]);
 }
 
 int Debugger::show_vmmap()
 {
-    unsigned long baseaddr, target, code;
+    reg_t baseaddr, target, code;
     map<range_t, map_entry_t> vmmap;
     map<range_t, map_entry_t>::iterator vi;
     if(load_maps(m_child_pid, vmmap) <= 0) {
@@ -296,8 +407,8 @@ int Debugger::show_vmmap()
 }
 
 int Debugger::load_maps(pid_t pid, map<range_t, map_entry_t>& loaded) {
-	char fn[128];
-	char buf[256];
+	char fn[MAX_BUF_SIZE];
+	char buf[MAX_BUF_SIZE];
 	FILE *fp;
 	snprintf(fn, sizeof(fn), "/proc/%u/maps", pid);
 	if((fp = fopen(fn, "rt")) == NULL) return -1;
@@ -332,12 +443,150 @@ int Debugger::load_maps(pid_t pid, map<range_t, map_entry_t>& loaded) {
 	return (int) loaded.size();
 }
 
-int Debugger::run()
+int Debugger::dumpCode(long code, char *msg) {
+	sprintf(msg, "%02x %02x %02x %02x %02x",
+		((unsigned char *) (&code))[0],
+		((unsigned char *) (&code))[1],
+		((unsigned char *) (&code))[2],
+		((unsigned char *) (&code))[3],
+		((unsigned char *) (&code))[4]);
+    return 0;
+}
+
+int Debugger::setBreakPoint(reg_t break_point)
 {
-    int cmd = 0;
-    while((cmd = getCommand()) >= 0)
+    char msgCode[MAX_BUF_SIZE];
+    reg_t code;
+    fprintf(stderr, "** start_point = 0x%zx, break_point = 0x%zx.\n", m_start_point, break_point);
+    /* get original text: 48 39 d0 */
+    code = ptrace(PTRACE_PEEKTEXT, m_child_pid, break_point, 0);
+
+    dumpCode(code, msgCode);
+    /* set break point */
+    if(ptrace(PTRACE_POKETEXT, m_child_pid, break_point, (code & 0xffffffffffffff00) | 0xcc) != 0)
+        errquit("** setBreak ptrace(POKETEXT)");
+    break_points[break_point] = code;
+    return 0;
+}
+
+int Debugger::checkProgramState()
+{
+    // printf("** wait_status = %d,  (%x)\n", m_wait_status, m_wait_status);
+    if (WIFEXITED(m_wait_status))
     {
-        // printf("**run() cmd %d\n", cmd);
+        printf("** child process %d terminiated normally (code %x)\n", m_child_pid, m_wait_status);
+        m_states = LoadedStates;
+    }
+    else if (WIFSTOPPED(m_wait_status))
+    {
+        struct user_regs_struct regs;
+        getReg(&regs);
+        map<reg_t, reg_t>::iterator iter;
+        iter = break_points.find(regs.rip-1);
+        if(iter != break_points.end()){
+            reg_t target, code;
+            target = iter->first;
+            code = iter->second;
+            /* restore break point */
+            if(ptrace(PTRACE_POKETEXT, m_child_pid, target, code) != 0)
+                errquit("ptrace(POKETEXT)");
+            /* set registers */
+            regs.rip = regs.rip-1;
+            // regs.rdx = regs.rax;
+            if(ptrace(PTRACE_SETREGS, m_child_pid, 0, &regs) != 0) errquit("ptrace(SETREGS)");
+            char codeMsg[MAX_BUF_SIZE];
+            dumpCode(code, codeMsg);
+            printf("** breakpoint @ \t 0x%llx: %s\tmov\tebx,1\n", regs.rip, codeMsg);
+            
+		}
+        printf("** child process %d stop (code %x)\n", m_child_pid, m_wait_status);
     }
     return 0;
+}
+
+int Debugger::bufferToCmds(char *buf, vector<string> *cmds)
+{
+    
+    int cmdCount = 0;
+    if (buf == NULL) return ERR;
+    buf[strcspn(buf, "\n")] = 0;
+    char *token = strtok(buf, " ");
+    std::string tokenStr;
+    while(token != NULL)
+    {
+        tokenStr.assign(token, strlen(token));
+        cmds->push_back(tokenStr);
+        cmdCount++;
+        token = strtok(NULL, " ");
+        // printf("token = %s cmdCount = %d %s\n", token, cmdCount, tokenStr.c_str());
+    }
+    return cmdCount;
+}
+
+int Debugger::runByStdin()
+{
+    int ret = 0;
+    char buffer[MAX_BUF_SIZE];
+    while (ret >= 0)
+    {
+        printf("sdb>");
+        fgets(buffer, MAX_BUF_SIZE, stdin);
+        vector<string> cmds;
+        int count = bufferToCmds(buffer, &cmds);
+        ret = doCommand(&cmds);
+    }
+    return 0;
+}
+
+int Debugger::runByScript()
+{
+    char buffer[MAX_BUF_SIZE];
+    int ret = 0;
+    FILE *fp;
+    fp = fopen(m_script, "r");
+    
+    if (fp != NULL) {
+        while (fgets(buffer, MAX_BUF_SIZE, fp) != NULL) {
+            printf("** script>%s", buffer);
+            vector<string> cmds;
+            int count = bufferToCmds(buffer, &cmds);
+            ret = doCommand(&cmds);
+        }
+        // printf("** close file\n");
+        fclose(fp);
+    } else
+        printf("** failed to open '%s' file.\n", m_script);
+
+    return 0;
+}
+
+int Debugger::readELF(char* program)
+{
+    int fd;
+    ElfN_Ehdr f_header;
+    fd = open(program, S_IRUSR);
+   if (fd < 0) {
+      printf("\nfile open error\n");
+      return -1;
+   }
+
+   /* Read ELF Header */
+   read(fd, &f_header, sizeof(ElfN_Ehdr));
+   printf("** 0x%lx\n", f_header.e_entry);
+   m_f_header = f_header;
+   fprintf(stdout, "** program '%s' loaded. entry point 0x%lx\n", program, m_f_header.e_entry);
+   setStates(LoadedStates);
+   return 0;
+}
+
+States Debugger::setStates(States newStates)
+{
+    States oldStates = m_states;
+    m_states = newStates;
+    return oldStates;
+}
+
+States Debugger::getStates()
+{
+    return m_states;
 }

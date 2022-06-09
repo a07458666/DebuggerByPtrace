@@ -988,4 +988,5 @@ int Debugger::setAllBreakpoin()
         auto beackAddr = (*iter).first;
         p_setBreakpoint(beackAddr);
     }
+    return 0;
 }

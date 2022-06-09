@@ -83,7 +83,8 @@ class Debugger{
         char *m_program;
         char *m_script;
         int m_wait_status;
-        std::map<reg_t, reg_t> m_break_points;
+        std::vector<reg_t> m_breakpoint_addrs;
+        std::map<reg_t, reg_t> m_breakpoints;
         
         int getReg(struct user_regs_struct *regs);
         int getRegs();
@@ -94,10 +95,11 @@ class Debugger{
         int doCommand(std::vector<std::string> *cmds);
         int loadProgram(char* program);
         int list();
-        int deleteBreak(reg_t break_point);
+        int deleteBreak(int idx);
         int cont();
         int step();
         int setBreakPoint(reg_t break_point);
+        int p_setBreakPoint(reg_t break_point);
         bool checkBreakPoint(reg_t break_point);
         int show_vmmap();
         int load_maps(pid_t pid, std::map<range_t, map_entry_t>& loaded);

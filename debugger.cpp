@@ -175,7 +175,7 @@ int Debugger::doCommand(std::vector<std::string> *cmds)
             printf(MSG_MUST_RUNNING);
         }
     }
-    else if (strcmp("list", cmd) == 0)
+    else if (strcmp("list", cmd) == 0 || strcmp("l", cmd) == 0)
     {
         list();
     }
@@ -188,9 +188,9 @@ int Debugger::doCommand(std::vector<std::string> *cmds)
                 printf(MSG_NO_ADDR);
                 return 0;
             }
-            char* break_point = (char *)cmds->at(1).c_str();
-            reg_t break_val = convertStr2ul(break_point);
-            deleteBreak(break_val);
+            char* idx_str = (char *)cmds->at(1).c_str();
+            unsigned long idx = convertStr2ul(idx_str);
+            deleteBreak((int)idx);
         }
         else
         {
@@ -300,12 +300,10 @@ int Debugger::step()
 int Debugger::list()
 {
     int count = 0;
-    for( map<reg_t,reg_t>::iterator iter=m_break_points.begin(); iter!=m_break_points.end(); ++iter)  
-    {  
-        auto beackAddr = (*iter).first;
-        printf("\t%d: %lx\n",count, beackAddr);
-        count++;
-    }  
+    for (int i = 0; i < m_breakpoint_addrs.size(); ++i)
+    {
+        printf("\t%d: %lx\n",i, m_breakpoint_addrs[i]);
+    }
     return 0;
 }
 
@@ -514,36 +512,47 @@ int Debugger::setBreakPoint(reg_t break_point)
 {
     char msgCode[MAX_BUF_SIZE];
 
-    if (m_break_points.find(break_point) != m_break_points.end())
+    if (m_breakpoints.find(break_point) != m_breakpoints.end())
     {
         printf("** the breakpoint is already exists.\n");
         return 0;
     }
 
-    reg_t code;
+    reg_t original_code;
     // fprintf(stderr, "** entry point = 0x%zx, break point = 0x%zx.\n", m_elf_info.entry_addr, break_point);
     /* get original text: 48 39 d0 */
-    code = peek_code(break_point);
+    original_code = peek_code(break_point);
 
-    dumpCode(code, msgCode);
+    // dumpCode(code, msgCode);
     /* set break point */
-    if(ptrace(PTRACE_POKETEXT, m_child_pid, break_point, (code & 0xffffffffffffff00) | 0xcc) != 0)
-        errquit("** setBreak ptrace(POKETEXT)");
-    m_break_points[break_point] = code;
+    p_setBreakPoint(break_point);
+    
+    m_breakpoint_addrs.push_back(break_point);
+    m_breakpoints[break_point] = original_code;
     return 0;
 }
 
-int Debugger::deleteBreak(reg_t break_point)
+int Debugger::p_setBreakPoint (reg_t break_point)
 {
-    if (m_break_points.find(break_point) == m_break_points.end())
+    unsigned long code = peek_code(break_point);
+    if(ptrace(PTRACE_POKETEXT, m_child_pid, break_point, (code & 0xffffffffffffff00) | 0xcc) != 0)
+        errquit("** setBreak ptrace(POKETEXT)");
+    return 0;
+}
+
+int Debugger::deleteBreak(int idx)
+{
+    if (idx < 0 || idx >= (int)m_breakpoint_addrs.size())
     {
-        printf("** not find breakpoint(%lx).\n", break_point);
+        printf("** not find idx (%d).\n", idx);
         return 0;
     }
+    reg_t breakpoint_addr = m_breakpoint_addrs[idx];
     /* restore break point */
-    if(ptrace(PTRACE_POKETEXT, m_child_pid, break_point, m_break_points[break_point]) != 0)
+    if(ptrace(PTRACE_POKETEXT, m_child_pid, breakpoint_addr, m_breakpoints[breakpoint_addr]) != 0)
         errquit("ptrace(POKETEXT)");
-    m_break_points.erase(break_point);
+    m_breakpoints.erase(breakpoint_addr);
+    m_breakpoint_addrs.erase(m_breakpoint_addrs.begin() + idx);
     return 0;
 }
 
@@ -554,14 +563,15 @@ int Debugger::checkProgramState()
     {
         printf("** child process %d terminiated normally (code %x)\n", m_child_pid, m_wait_status);
         m_states = LoadedStates;
+        if (loadProgram(m_program) != 0) errquit("**loadProgram");
     }
     else if (WIFSTOPPED(m_wait_status))
     {
         struct user_regs_struct regs;
         getReg(&regs);
         map<reg_t, reg_t>::iterator iter;
-        iter = m_break_points.find(regs.rip-1);
-        if(iter != m_break_points.end()){
+        iter = m_breakpoints.find(regs.rip-1);
+        if(iter != m_breakpoints.end()){
             reg_t target, code;
             target = iter->first;
             code = iter->second;
@@ -733,10 +743,10 @@ int Debugger::readELF(char* program)
 
 int Debugger::recoverBeackPoint()
 {
-    for( map<reg_t,reg_t>::iterator iter=m_break_points.begin(); iter!=m_break_points.end(); ++iter)  
+    for( map<reg_t,reg_t>::iterator iter=m_breakpoints.begin(); iter!=m_breakpoints.end(); ++iter)  
     {  
         auto beackAddr = (*iter).first;
-        setBreakPoint(beackAddr);
+        p_setBreakPoint(beackAddr);
     } 
     return 0;
 }
@@ -822,7 +832,7 @@ unsigned long Debugger::disassemble(pid_t proc, unsigned long long rip) {
 		errno = 0;
         if (checkBreakPoint(ptr))
         {
-            peek = m_break_points[ptr];
+            peek = m_breakpoints[ptr];
             memcpy(&buf[ptr-rip], &peek, PEEKSIZE);
         }
         else
@@ -876,5 +886,5 @@ reg_t Debugger::peek_code(reg_t addr)
 
 bool Debugger::checkBreakPoint(reg_t break_point)
 {
-    return m_break_points.find(break_point) != m_break_points.end();
+    return m_breakpoints.find(break_point) != m_breakpoints.end();
 }

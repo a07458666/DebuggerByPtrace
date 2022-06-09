@@ -10,7 +10,7 @@
 using namespace std;
 
 #define	PEEKSIZE	8
-
+#define DUMP_SIZE 16
 #define BASE 16
 #define MAX_BUF_SIZE 256
 #define ERR -1
@@ -80,8 +80,8 @@ class Debugger{
 
         States m_states;
         pid_t m_child_pid;
-        char *m_program;
-        char *m_script;
+        string m_program;
+        string m_script;
         int m_wait_status;
         std::vector<reg_t> m_breakpoint_addrs;
         std::map<reg_t, reg_t> m_breakpoints;
@@ -92,27 +92,31 @@ class Debugger{
         int getOneReg(char* target);
         int setReg(char* target, char* val);
         int dumpCode(long code, char* msg);
+        int dumpCodeASCII(reg_t addr);
+        char char2ASCII(unsigned char c);
         int doCommand(std::vector<std::string> *cmds);
-        int loadProgram(char* program);
+        int loadProgram(string program);
         int list();
         int deleteBreak(int idx);
         int cont();
         int step();
         int setBreakPoint(reg_t break_point);
-        int p_setBreakPoint(reg_t break_point);
-        bool checkBreakPoint(reg_t break_point);
+        int p_setBreakpoint(reg_t break_point);
+        bool checkBreakpoint(reg_t break_point);
         int show_vmmap();
         int load_maps(pid_t pid, std::map<range_t, map_entry_t>& loaded);
         reg_t convertStr2ul(char* val);
-        int checkProgramState();
+        int checkProgramState(struct user_regs_struct regs);
         int bufferToCmds(char *buf, std::vector<std::string> *cmds);
-        int readELF(char* program);
+        int readELF(string program);
         States setStates(States newStates);
         States getStates();
-        int recoverBeackPoint();
+        int recoverBeackpoint(struct user_regs_struct regs);
+        int setAllBreakpoin();
         int disasm(int instructionsCount, reg_t addr);
         int dump(reg_t addr);
         reg_t peek_code(reg_t addr);
+        bool checkAddrInTextRange(reg_t addr);
     public:
         Debugger(char * script, char* program);
         ~Debugger();

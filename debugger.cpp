@@ -41,13 +41,12 @@ void str2lowerStr(char * scrip)
 Debugger::Debugger(char * script, char* program)
 {
     m_states = NotLoadedStates;
-    m_program = program;
-    m_script = script;
+    m_program.assign(program);
+    m_script.assign(script);
     if (strcmp(program, "") != 0) 
     {
         if (readELF(program) != 0) errquit("** readELF");
     }
-    if (init_disasm() != 0) errquit("** cshandle");
 }
 
 Debugger::~Debugger(){
@@ -93,12 +92,12 @@ int Debugger::doCommand(std::vector<std::string> *cmds)
     {
         if (getStates() == RunningStates)
         {
-            printf("** program %s is already running\n", m_program);
+            printf("** program %s is already running\n", m_program.c_str());
             cont();
         }
         else if (getStates() == LoadedStates)
         {
-            printf("** run program '%s'\n", m_program);
+            printf("** run program '%s'\n", m_program.c_str());
             if (loadProgram(m_program) != 0) errquit("**loadProgram");
             cont();
         }
@@ -276,23 +275,31 @@ int Debugger::doCommand(std::vector<std::string> *cmds)
     {
         printf("**not define cmd %s\n", cmd);
     }
-    if (getStates() == RunningStates) checkProgramState();
+    fflush(stdout);
     return ret;
 }
 
 int Debugger::cont()
 {
+    struct user_regs_struct regs;
+    getReg(&regs);
+    recoverBeackpoint(regs);
     if(ptrace(PTRACE_CONT, m_child_pid,0 ,0) < 0) errquit("**ptrace@cont");
     if(waitpid(m_child_pid, &m_wait_status, 0) < 0) errquit("**waitpid");
     setStates(RunningStates);
+    checkProgramState(regs);
     return 0;
 }
 
 // cmd si
 int Debugger::step()
 {
+    struct user_regs_struct regs;
+    getReg(&regs);
+    recoverBeackpoint(regs);
     if (ptrace(PTRACE_SINGLESTEP, m_child_pid, 0, 0) < 0) errquit("** ptrace@STEP");
     if (waitpid(m_child_pid, &m_wait_status, 0) < 0) errquit("** setp");
+    checkProgramState(regs);
     return 0;
 }
 
@@ -318,11 +325,11 @@ int Debugger::getRegs()
 
 int Debugger::showRegs(struct user_regs_struct regs)
 {
-    printf("RAX %llx\tRBX %llx\tRCX %llx\tRDX %llx\n", regs.rax, regs.rbx, regs.rcx, regs.rdx);
-    printf("R8  %llx\tR9  %llx\tR10 %llx\tR11 %llx\n", regs.r8 , regs.r9 , regs.r10, regs.r11);
-    printf("R12 %llx\tR13 %llx\tR14 %llx\tR15 %llx\n", regs.r12, regs.r13, regs.r14, regs.r15);
-    printf("RDI %llx\tRSI %llx\tRBP %llx\tRSP %llx\n", regs.rdi, regs.rsi, regs.rbp, regs.rsp);
-    printf("RIP %llx\tFLAGS %016llx\n", regs.rip, regs.eflags);
+    printf("RAX %-16llx\tRBX %-16llx\tRCX %-16llx\tRDX %-16llx\n", regs.rax, regs.rbx, regs.rcx, regs.rdx);
+    printf("R8  %-16llx\tR9  %-16llx\tR10 %-16llx\tR11 %-16llx\n", regs.r8 , regs.r9 , regs.r10, regs.r11);
+    printf("R12 %-16llx\tR13 %-16llx\tR14 %-16llx\tR15 %-16llx\n", regs.r12, regs.r13, regs.r14, regs.r15);
+    printf("RDI %-16llx\tRSI %-16llx\tRBP %-16llx\tRSP %-16llx\n", regs.rdi, regs.rsi, regs.rbp, regs.rsp);
+    printf("RIP %-16llx\tFLAGS %016llx\n", regs.rip, regs.eflags);
     return 0;
 }
 
@@ -409,12 +416,12 @@ int Debugger::setReg(char* target, char* valStr)
     return 0;
 }
 
-int Debugger::loadProgram(char* program)
+int Debugger::loadProgram(string program)
 {
     char * const argv[] = {NULL};
     pid_t parant_pid = getpid();
     pid_t child_pid;
-    if (program == NULL)
+    if (program == "")
         return -1;
     
     if ((child_pid = fork()) < 0)
@@ -427,7 +434,7 @@ int Debugger::loadProgram(char* program)
     {
         // printf("** child pid %d\n", getpid());
         if (ptrace(PTRACE_TRACEME, 0, 0, 0) < 0) errquit("** ptrace@child PTRACE_TRACEME");
-        execvp(program, argv);
+        execvp(program.c_str(), argv);
         perror("** execvp");
         exit(1); 
     }
@@ -439,7 +446,7 @@ int Debugger::loadProgram(char* program)
         if(waitpid(m_child_pid, &m_wait_status, 0) < 0) errquit("** waitpid");
         ptrace(PTRACE_SETOPTIONS, m_child_pid, 0, PTRACE_O_EXITKILL);
     }
-    recoverBeackPoint();
+    setAllBreakpoin();
     setStates(RunningStates);
     return 0;
 }
@@ -508,9 +515,65 @@ int Debugger::dumpCode(long code, char *msg) {
     return 0;
 }
 
+char Debugger::char2ASCII(unsigned char c)
+{
+    if (c < 32 || c > 127)
+    {
+        return '.';
+    }
+    return c;
+}
+
+int Debugger::dumpCodeASCII(reg_t addr) {
+    reg_t code = peek_code(addr);
+    reg_t code4 = peek_code(addr + 4);
+    reg_t code8 = peek_code(addr + 8);
+    reg_t code12 = peek_code(addr + 12);
+
+	printf("\t%lx: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
+        addr,
+		((unsigned char *) (&code))[0],
+		((unsigned char *) (&code))[1],
+		((unsigned char *) (&code))[2],
+		((unsigned char *) (&code))[3],
+		((unsigned char *) (&code4))[0],
+        ((unsigned char *) (&code4))[1],
+		((unsigned char *) (&code4))[2],
+		((unsigned char *) (&code4))[3],
+		((unsigned char *) (&code8))[0],
+		((unsigned char *) (&code8))[1],
+        ((unsigned char *) (&code8))[2],
+		((unsigned char *) (&code8))[3],
+		((unsigned char *) (&code12))[0],
+		((unsigned char *) (&code12))[1],
+		((unsigned char *) (&code12))[2],
+        ((unsigned char *) (&code12))[3]);
+    printf("  |%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c|\n",
+        char2ASCII(((unsigned char *) (&code))[0]),
+        char2ASCII(((unsigned char *) (&code))[1]),
+        char2ASCII(((unsigned char *) (&code))[2]),
+        char2ASCII(((unsigned char *) (&code))[3]),
+        char2ASCII(((unsigned char *) (&code4))[0]),
+        char2ASCII(((unsigned char *) (&code4))[1]),
+        char2ASCII(((unsigned char *) (&code4))[2]),
+        char2ASCII(((unsigned char *) (&code4))[3]),
+        char2ASCII(((unsigned char *) (&code8))[0]),
+        char2ASCII(((unsigned char *) (&code8))[1]),
+        char2ASCII(((unsigned char *) (&code8))[2]),
+        char2ASCII(((unsigned char *) (&code8))[3]),
+        char2ASCII(((unsigned char *) (&code12))[0]),
+        char2ASCII(((unsigned char *) (&code12))[1]),
+        char2ASCII(((unsigned char *) (&code12))[2]),
+        char2ASCII(((unsigned char *) (&code12))[3])
+        );
+    return 0;
+}
+
 int Debugger::setBreakPoint(reg_t break_point)
 {
     char msgCode[MAX_BUF_SIZE];
+
+    if (!checkAddrInTextRange(break_point)) return 0;
 
     if (m_breakpoints.find(break_point) != m_breakpoints.end())
     {
@@ -525,14 +588,14 @@ int Debugger::setBreakPoint(reg_t break_point)
 
     // dumpCode(code, msgCode);
     /* set break point */
-    p_setBreakPoint(break_point);
+    p_setBreakpoint(break_point);
     
     m_breakpoint_addrs.push_back(break_point);
     m_breakpoints[break_point] = original_code;
     return 0;
 }
 
-int Debugger::p_setBreakPoint (reg_t break_point)
+int Debugger::p_setBreakpoint (reg_t break_point)
 {
     unsigned long code = peek_code(break_point);
     if(ptrace(PTRACE_POKETEXT, m_child_pid, break_point, (code & 0xffffffffffffff00) | 0xcc) != 0)
@@ -556,7 +619,7 @@ int Debugger::deleteBreak(int idx)
     return 0;
 }
 
-int Debugger::checkProgramState()
+int Debugger::checkProgramState(struct user_regs_struct regs)
 {
     // printf("** wait_status = %d,  (%x)\n", m_wait_status, m_wait_status);
     if (WIFEXITED(m_wait_status))
@@ -567,24 +630,10 @@ int Debugger::checkProgramState()
     }
     else if (WIFSTOPPED(m_wait_status))
     {
-        struct user_regs_struct regs;
-        getReg(&regs);
         map<reg_t, reg_t>::iterator iter;
         iter = m_breakpoints.find(regs.rip-1);
         if(iter != m_breakpoints.end()){
-            reg_t target, code;
-            target = iter->first;
-            code = iter->second;
-            /* restore break point */
-            if(ptrace(PTRACE_POKETEXT, m_child_pid, target, code) != 0)
-                errquit("** ptrace(POKETEXT)");
-            /* set registers */
-            regs.rip = regs.rip-1;
-            // regs.rdx = regs.rax;
-            if(ptrace(PTRACE_SETREGS, m_child_pid, 0, &regs) != 0) errquit("ptrace(SETREGS)");
-            char codeMsg[MAX_BUF_SIZE];
-            dumpCode(code, codeMsg);
-            printf("** breakpoint @ \t 0x%llx: %s\tmov\tebx,1\n", regs.rip, codeMsg);
+            p_setBreakpoint(iter->first);
 		}
         printf("** child process %d stop (code %x)\n", m_child_pid, m_wait_status);
     }
@@ -630,7 +679,7 @@ int Debugger::runByScript()
     char buffer[MAX_BUF_SIZE];
     int ret = 0;
     FILE *fp;
-    fp = fopen(m_script, "r");
+    fp = fopen(m_script.c_str(), "r");
     
     if (fp != NULL) {
         while (fgets(buffer, MAX_BUF_SIZE, fp) != NULL) {
@@ -642,16 +691,16 @@ int Debugger::runByScript()
         // printf("** close file\n");
         fclose(fp);
     } else
-        printf("** failed to open '%s' file.\n", m_script);
+        printf("** failed to open '%s' file.\n", m_script.c_str());
 
     return 0;
 }
 
 
-int Debugger::readELF(char* program)
+int Debugger::readELF(string program)
 {
     FILE * pFile = NULL;
-    pFile = fopen(program, "r");
+    pFile = fopen(program.c_str(), "r");
     if (pFile == NULL) errquit("** fopen");
 
     // check if elf file
@@ -659,7 +708,7 @@ int Debugger::readELF(char* program)
     fread(elf_head, 1, 5, pFile);
     if (elf_head[0] != 0x7F || elf_head[1] != 'E' || elf_head[2] != 'L' || elf_head[3] != 'F')
     {
-        fprintf(stdout, "** if not elf file %s\n", program);
+        fprintf(stdout, "** if not elf file %s\n", program.c_str());
         return ERR;
     }
     elf_type = (int)elf_head[4];
@@ -673,7 +722,7 @@ int Debugger::readELF(char* program)
         fseek(pFile, m_elf_header32.e_shoff + m_elf_header32.e_shstrndx * sizeof(Elf32_Shdr), SEEK_SET);
         fread(&m_sh_table32, 1, sizeof(Elf32_Shdr), pFile);
         m_elf_info.entry_addr = (unsigned long)m_elf_header32.e_entry;
-        fprintf(stdout, "** program '%s' loaded. entry point 0x%lx\n", program, m_elf_info.entry_addr);
+        fprintf(stdout, "** program '%s' loaded. entry point 0x%lx\n", program.c_str(), m_elf_info.entry_addr);
         char SectNames[MAX_BUF_SIZE] = "";
         fseek(pFile, m_sh_table32.sh_offset, SEEK_SET);
         fread(SectNames, 1, m_sh_table32.sh_size, pFile);
@@ -707,7 +756,7 @@ int Debugger::readELF(char* program)
         fseek(pFile, m_elf_header64.e_shoff + m_elf_header64.e_shstrndx * sizeof(Elf64_Shdr), SEEK_SET);
         fread(&m_sh_table64, 1, sizeof(Elf64_Shdr), pFile);
         m_elf_info.entry_addr = (unsigned long)m_elf_header64.e_entry;
-        fprintf(stdout, "** program '%s' loaded. entry point 0x%lx\n", program, m_elf_info.entry_addr);
+        fprintf(stdout, "** program '%s' loaded. entry point 0x%lx\n", program.c_str(), m_elf_info.entry_addr);
         char SectNames[MAX_BUF_SIZE] = "";
         fseek(pFile, m_sh_table64.sh_offset, SEEK_SET);
         fread(SectNames, 1, m_sh_table64.sh_size, pFile);
@@ -737,17 +786,30 @@ int Debugger::readELF(char* program)
     {
         fprintf(stdout, "** unknown elf type (invalid class '0', 32-bit '1', 64-bit '2') %d\n", elf_type);
     }
-   setStates(LoadedStates);
-   return 0;
+    if (init_disasm() != 0) errquit("** cshandle");
+    setStates(LoadedStates);
+    return 0;
 }
 
-int Debugger::recoverBeackPoint()
-{
-    for( map<reg_t,reg_t>::iterator iter=m_breakpoints.begin(); iter!=m_breakpoints.end(); ++iter)  
-    {  
-        auto beackAddr = (*iter).first;
-        p_setBreakPoint(beackAddr);
-    } 
+int Debugger::recoverBeackpoint(struct user_regs_struct regs)
+{ 
+    map<reg_t, reg_t>::iterator iter;
+    iter = m_breakpoints.find(regs.rip-1);
+    if(iter != m_breakpoints.end()){
+        reg_t target, code;
+        target = iter->first;
+        code = iter->second;
+        /* restore break point */
+        if(ptrace(PTRACE_POKETEXT, m_child_pid, target, code) != 0)
+            errquit("** ptrace(POKETEXT)");
+        /* set registers */
+        regs.rip = regs.rip-1;
+        // regs.rdx = regs.rax;
+        if(ptrace(PTRACE_SETREGS, m_child_pid, 0, &regs) != 0) errquit("ptrace(SETREGS)");
+        char codeMsg[MAX_BUF_SIZE];
+        dumpCode(code, codeMsg);
+        printf("** breakpoint @ \t 0x%llx: %s\tmov\tebx,1\n", regs.rip, codeMsg);
+    }
     return 0;
 }
 
@@ -766,14 +828,14 @@ States Debugger::getStates()
 int Debugger::disasm(int instructionsCount, reg_t addr)
 {
     unsigned long offect = 0;
-    if (addr < m_elf_info.entry_addr)
+    if (!checkAddrInTextRange(addr))
     {
         fprintf(stdout, "** the address is out of the range of the text segment\n");
         return 0;
     }
     for (unsigned long i = 0; i < MAX_DUMP_INSTRUCTIONS; ++i)
-    {
-        if (addr + offect < m_elf_info.text_min_addr || addr + offect >= m_elf_info.text_max_addr)
+    {   
+        if (!checkAddrInTextRange(addr + offect))
         {
             fprintf(stdout, "** the address is out of the range of the text segment\n");
             break;
@@ -788,10 +850,21 @@ int Debugger::disasm(int instructionsCount, reg_t addr)
 
 int Debugger::init_disasm()
 {
-    if(cs_open(CS_ARCH_X86, CS_MODE_64, &cshandle) != CS_ERR_OK)
+    if (elf_type == ELF_32_BIT_TYPE)
     {
-        return -1;
+        if(cs_open(CS_ARCH_X86, CS_MODE_32, &cshandle) != CS_ERR_OK)
+        {
+            return -1;
+        }
     }
+    else if (elf_type == ELF_64_BIT_TYPE)
+    {
+        if(cs_open(CS_ARCH_X86, CS_MODE_64, &cshandle) != CS_ERR_OK)
+        {
+            return -1;
+        }
+    }
+    
     // printf("** cshandle %ld\n", cshandle);
     return 0;
 }
@@ -830,7 +903,7 @@ unsigned long Debugger::disassemble(pid_t proc, unsigned long long rip) {
 	for(ptr = rip; ptr < rip + sizeof(buf); ptr += PEEKSIZE) {
 		reg_t peek;
 		errno = 0;
-        if (checkBreakPoint(ptr))
+        if (checkBreakpoint(ptr))
         {
             peek = m_breakpoints[ptr];
             memcpy(&buf[ptr-rip], &peek, PEEKSIZE);
@@ -875,6 +948,16 @@ unsigned long Debugger::disassemble(pid_t proc, unsigned long long rip) {
 
 int Debugger::dump(reg_t addr)
 {
+    reg_t code, code4, code8, code12;
+    if (!checkAddrInTextRange(addr))
+    {
+        fprintf(stdout, "** the address is out of the range of the text segment\n");
+        return 0;
+    }
+    for (int offset = 0; offset < 80; offset += DUMP_SIZE)
+    {
+        dumpCodeASCII(addr + offset);
+    }
     return 0;
 }
 
@@ -884,7 +967,25 @@ reg_t Debugger::peek_code(reg_t addr)
     return code;
 }
 
-bool Debugger::checkBreakPoint(reg_t break_point)
+bool Debugger::checkBreakpoint(reg_t break_point)
 {
     return m_breakpoints.find(break_point) != m_breakpoints.end();
+}
+
+bool Debugger::checkAddrInTextRange(reg_t addr)
+{
+    if (addr >= m_elf_info.text_min_addr && addr < m_elf_info.text_max_addr)
+    {
+        return true;
+    }
+    return false;
+}
+
+int Debugger::setAllBreakpoin()
+{
+    for( map<reg_t,reg_t>::iterator iter=m_breakpoints.begin(); iter!=m_breakpoints.end(); ++iter)  
+    {  
+        auto beackAddr = (*iter).first;
+        p_setBreakpoint(beackAddr);
+    }
 }

@@ -5,6 +5,11 @@
 #include <map>
 #include <vector>
 #include <elf.h>
+#include <capstone/capstone.h>
+
+using namespace std;
+
+#define	PEEKSIZE	8
 
 #define BASE 16
 #define MAX_BUF_SIZE 256
@@ -15,6 +20,7 @@
 
 #define GETPOSE printf("** file %s, line %d\n", __FILE__, __LINE__);
 typedef unsigned long reg_t;
+
 typedef struct range_s {
 	unsigned long begin, end;
 }	range_t;
@@ -27,6 +33,13 @@ typedef struct map_entry_s {
 	std::string name;
 }	map_entry_t;
 
+class instruction {
+public:
+	unsigned char bytes[16];
+	int size;
+	string opr, opnd;
+};
+
 bool operator<(range_t r1, range_t r2);
 
 enum States {NotLoadedStates, LoadedStates, RunningStates};
@@ -34,6 +47,14 @@ enum States {NotLoadedStates, LoadedStates, RunningStates};
 
 class Debugger{
     private:
+        // disasm
+        csh cshandle = 0;
+        map<long long, instruction> instructions;
+        int init_disasm();
+        int close_disasm();
+        void print_instruction(long long addr, instruction *in);
+        unsigned long disassemble(pid_t proc, unsigned long long rip);
+
         States m_states;
         pid_t m_child_pid;
         char *m_program;
@@ -65,7 +86,7 @@ class Debugger{
         States getStates();
         int recoverBeackPoint();
         int disasm(int instructionsCount, reg_t addr);
-        int preloadDisasm();
+        int dump(reg_t addr);
     public:
         Debugger(char * script, char* program);
         ~Debugger();

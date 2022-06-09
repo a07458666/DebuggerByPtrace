@@ -12,7 +12,6 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
-#include "dumpCode.h"
 #include "debugger.h"
 
 using namespace std;
@@ -38,11 +37,11 @@ Debugger::Debugger(char * script, char* program)
     {
         if (readELF(program) != 0) errquit("** readELF");
     }
-    if (init() != 0) errquit("** cshandle");
+    if (init_disasm() != 0) errquit("** cshandle");
 }
 
 Debugger::~Debugger(){
-    closeHandle();
+    close_disasm();
 }
 
 int Debugger::doCommand(std::vector<std::string> *cmds)
@@ -181,6 +180,24 @@ int Debugger::doCommand(std::vector<std::string> *cmds)
             char* break_point = (char *)cmds->at(1).c_str();
             reg_t break_val = convertStrToNumber(break_point);
             deleteBreak(break_val);
+        }
+        else
+        {
+            printf("** states must be RunningStates\n");
+        }
+    }
+    else if (strcmp("dump", cmd) == 0)
+    {
+        if (getStates() == RunningStates)
+        {
+            if (cmds->size() < 2) 
+            {
+                printf("** no addr is given\n");
+                return 0;
+            }
+            char* addr = (char *)cmds->at(1).c_str();
+            reg_t addr_val = convertStrToNumber(addr);
+            dump(addr_val);
         }
         else
         {
@@ -414,7 +431,6 @@ int Debugger::loadProgram(char* program)
         ptrace(PTRACE_SETOPTIONS, m_child_pid, 0, PTRACE_O_EXITKILL);
     }
     recoverBeackPoint();
-    preloadDisasm();
     setStates(RunningStates);
     return 0;
 }
@@ -680,7 +696,7 @@ int Debugger::disasm(int instructionsCount, reg_t addr)
     }
     for (unsigned long i = 0; i < MAX_DUMP_INSTRUCTIONS; ++i)
     {
-        unsigned long ret = disassemble(m_child_pid, addr + offect, true);
+        unsigned long ret = disassemble(m_child_pid, addr + offect);
         offect += ret;
         if (offect >= m_sh_table.sh_size){
             fprintf(stdout, "** the address is out of the range of the text segment\n");
@@ -690,14 +706,86 @@ int Debugger::disasm(int instructionsCount, reg_t addr)
     return 0;
 }
 
-int Debugger::preloadDisasm ()
+int Debugger::init_disasm()
 {
-    unsigned long offect = 0;
-    if (m_sh_table.sh_size < 0) errquit("** preloadDisasm");
-    while (offect < m_sh_table.sh_size)
+    if(cs_open(CS_ARCH_X86, CS_MODE_64, &cshandle) != CS_ERR_OK)
     {
-        unsigned long ret = disassemble(m_child_pid, m_elf_header.e_entry + offect, false);
-        offect += ret;
-    }   
+        return -1;
+    }
+    // printf("** cshandle %ld\n", cshandle);
+    return 0;
+}
+
+int Debugger::close_disasm()
+{
+    cs_close(&cshandle);
+    return 0;
+}
+
+void Debugger::print_instruction(long long addr, instruction *in) {
+	int i;
+	char bytes[128] = "";
+	if(in == NULL) {
+		fprintf(stdout, "\t%06llx:\t<cannot disassemble>\n", addr);
+	} else {
+		for(i = 0; i < in->size; i++) {
+			snprintf(&bytes[i*3], 4, "%2.2x ", in->bytes[i]);
+		}
+		fprintf(stdout, "\t%06llx: %-32s\t%-10s%s\n", addr, bytes, in->opr.c_str(), in->opnd.c_str());
+	}
+}
+
+unsigned long Debugger::disassemble(pid_t proc, unsigned long long rip) {
+	int count;
+	char buf[64] = { 0 };
+	unsigned long long ptr = rip;
+	cs_insn *insn;
+	map<long long, instruction>::iterator mi; // from memory addr to instruction
+
+	if((mi = instructions.find(rip)) != instructions.end()) {
+		print_instruction(rip, &mi->second);
+        return mi->second.size;
+	}
+    
+	for(ptr = rip; ptr < rip + sizeof(buf); ptr += PEEKSIZE) {
+		long long peek;
+		errno = 0;
+		peek = ptrace(PTRACE_PEEKTEXT, proc, ptr, NULL);
+		if(errno != 0) break;
+		memcpy(&buf[ptr-rip], &peek, PEEKSIZE);
+	}
+	if(ptr == rip)  {
+		print_instruction(rip, NULL);
+		return 0;
+	}
+    
+    // printf("cs_disasm cshandle %ld\n", cshandle);
+	
+    if((count = cs_disasm(cshandle, (uint8_t*) buf, rip-ptr, rip, 0, &insn)) > 0) {
+		int i;
+		for(i = 0; i < count; i++) {
+			instruction in;
+			in.size = insn[i].size;
+			in.opr  = insn[i].mnemonic;
+			in.opnd = insn[i].op_str;
+			memcpy(in.bytes, insn[i].bytes, insn[i].size);
+			instructions[insn[i].address] = in;
+		}
+		cs_free(insn, count);
+	}
+    
+	if((mi = instructions.find(rip)) != instructions.end()) {
+		print_instruction(rip, &mi->second);
+        return mi->second.size;
+	} else {
+		print_instruction(rip, NULL);
+        return 0;
+	}
+    
+	return 0;
+}
+
+int Debugger::dump(reg_t addr)
+{
     return 0;
 }

@@ -1,5 +1,4 @@
 help
 load sample/hello64
 start
-vmmap
 disasm 0x4000b0

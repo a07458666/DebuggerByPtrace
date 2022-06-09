@@ -12,7 +12,7 @@ using namespace std;
 #define	PEEKSIZE	8
 #define DUMP_SIZE 16
 #define BASE 16
-#define MAX_BUF_SIZE 256
+#define MAX_BUF_SIZE 1024
 #define ERR -1
 #define MAX_DUMP_INSTRUCTIONS 10
 #define ELF_32_BIT_TYPE 1

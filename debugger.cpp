@@ -715,7 +715,8 @@ int Debugger::readELF(string program)
 
     // get m_elf_header
     if (elf_type == ELF_32_BIT_TYPE)
-    {
+    {   
+        printf("** 32 bit\n");
         fseek(pFile, 0, SEEK_SET);
         fread(&m_elf_header32, 1, sizeof(Elf32_Ehdr), pFile);
 
@@ -724,6 +725,7 @@ int Debugger::readELF(string program)
         m_elf_info.entry_addr = (unsigned long)m_elf_header32.e_entry;
         fprintf(stdout, "** program '%s' loaded. entry point 0x%lx\n", program.c_str(), m_elf_info.entry_addr);
         char SectNames[MAX_BUF_SIZE] = "";
+        if (m_sh_table32.sh_size > MAX_BUF_SIZE) printf("** m_sh_table32.sh_size > MAX_BUF_SIZE\n");
         fseek(pFile, m_sh_table32.sh_offset, SEEK_SET);
         fread(SectNames, 1, m_sh_table32.sh_size, pFile);
 
@@ -750,6 +752,7 @@ int Debugger::readELF(string program)
     }
     else if (elf_type == ELF_64_BIT_TYPE)
     {
+        printf("** 64 bit\n");
         fseek(pFile, 0, SEEK_SET);
         fread(&m_elf_header64, 1, sizeof(Elf64_Ehdr), pFile);
 
@@ -759,6 +762,7 @@ int Debugger::readELF(string program)
         fprintf(stdout, "** program '%s' loaded. entry point 0x%lx\n", program.c_str(), m_elf_info.entry_addr);
         char SectNames[MAX_BUF_SIZE] = "";
         fseek(pFile, m_sh_table64.sh_offset, SEEK_SET);
+        if (m_sh_table64.sh_size > MAX_BUF_SIZE) printf("** m_sh_table64.sh_size > MAX_BUF_SIZE\n");
         fread(SectNames, 1, m_sh_table64.sh_size, pFile);
 
         for (int idx = 0; idx < m_elf_header64.e_shnum; idx++)
@@ -788,6 +792,7 @@ int Debugger::readELF(string program)
     }
     if (init_disasm() != 0) errquit("** cshandle");
     setStates(LoadedStates);
+    fclose(pFile);
     return 0;
 }
 

@@ -15,10 +15,18 @@ using namespace std;
 #define MAX_BUF_SIZE 256
 #define ERR -1
 #define MAX_DUMP_INSTRUCTIONS 10
-#define ElfN_Ehdr Elf64_Ehdr
-#define ElfN_Shdr Elf64_Shdr
-
+#define ELF_32_BIT_TYPE 1
+#define ELF_64_BIT_TYPE 2
 #define GETPOSE printf("** file %s, line %d\n", __FILE__, __LINE__);
+
+// Msg
+#define MSG_MUST_NOT_LOADED_STATES "**states must be NotLoadedStates\n"
+#define MSG_MUST_LOADED_STATES "** states must be LoadedStates\n"
+#define MSG_MUST_RUNNING_OR_LOADED "** states must be RunningStates or LoadedStates\n"
+#define MSG_MUST_RUNNING "** states must be RunningStates\n"
+#define MSG_NO_REG_NAME "** no regName is given\n"
+#define MSG_NO_REG_NAME_OR_VAL "** no regName or regVal\n"
+#define MSG_NO_ADDR "** no address is given\n"
 typedef unsigned long reg_t;
 
 typedef struct range_s {
@@ -32,6 +40,13 @@ typedef struct map_entry_s {
     std::string permStr;
 	std::string name;
 }	map_entry_t;
+
+typedef struct elf_info_s {
+    unsigned long entry_addr;
+    unsigned long text_size;
+    unsigned long text_min_addr;
+    unsigned long text_max_addr;
+} elf_info_t;
 
 class instruction {
 public:
@@ -55,14 +70,21 @@ class Debugger{
         void print_instruction(long long addr, instruction *in);
         unsigned long disassemble(pid_t proc, unsigned long long rip);
 
+        // elf
+        int elf_type = 0;
+        Elf32_Ehdr m_elf_header32;
+        Elf32_Shdr m_sh_table32;
+        Elf64_Ehdr m_elf_header64;
+        Elf64_Shdr m_sh_table64;
+        elf_info_t m_elf_info;
+
         States m_states;
         pid_t m_child_pid;
         char *m_program;
         char *m_script;
         int m_wait_status;
         std::map<reg_t, reg_t> m_break_points;
-        ElfN_Ehdr m_elf_header;
-        ElfN_Shdr m_sh_table;
+        
         int getReg(struct user_regs_struct *regs);
         int getRegs();
         int showRegs(struct user_regs_struct regs);
@@ -76,9 +98,10 @@ class Debugger{
         int cont();
         int step();
         int setBreakPoint(reg_t break_point);
+        bool checkBreakPoint(reg_t break_point);
         int show_vmmap();
         int load_maps(pid_t pid, std::map<range_t, map_entry_t>& loaded);
-        reg_t convertStrToNumber(char* val);
+        reg_t convertStr2ul(char* val);
         int checkProgramState();
         int bufferToCmds(char *buf, std::vector<std::string> *cmds);
         int readELF(char* program);
@@ -87,6 +110,7 @@ class Debugger{
         int recoverBeackPoint();
         int disasm(int instructionsCount, reg_t addr);
         int dump(reg_t addr);
+        reg_t peek_code(reg_t addr);
     public:
         Debugger(char * script, char* program);
         ~Debugger();

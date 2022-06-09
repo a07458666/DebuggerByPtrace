@@ -13,7 +13,7 @@ all: $(PROGS)
 %: %.cpp
 	$(CXX) -o $@ $(CFLAGS) $< $(LDFLAGS) -lcapstone
 
-hw4: debugger.o dumpCode.o hw4.o
+hw4: debugger.o hw4.o
 	$(CXX) -o $@ $^ $(LDFLAGS) -lcapstone
 
 clean:

@@ -91,44 +91,60 @@ class Debugger{
         std::vector<reg_t> m_breakpoint_addrs;
         std::map<reg_t, reg_t> m_breakpoints;
         
-        int getReg(struct user_regs_struct *regs);
-        int getRegs();
+        States setStates(States newStates);
+        States getStates();
+
         int showRegs(struct user_regs_struct regs);
         int getOneReg(char* target);
-        int setReg(char* target, char* val);
         int dumpCode(long code, char* msg);
         int dumpCodeASCII(reg_t addr);
         int doCommand(std::vector<std::string> *cmds);
-        int loadProgram(string program);
-        int list();
-        int deleteBreak(int idx);
-        int cont();
-        int step();
-        int setBreakPoint(reg_t break_point);
-        int p_setBreakpoint(reg_t break_point);
-        bool checkBreakpoint(reg_t break_point);
-        int show_vmmap();
+        
         int load_maps(pid_t pid, std::map<range_t, map_entry_t>& loaded);
         reg_t convertStr2ul(char* val);
         int checkProgramState(reg_t before_rip);
         int bufferToCmds(char *buf, std::vector<std::string> *cmds);
-        int readELF(string program);
-        States setStates(States newStates);
-        States getStates();
+        
+        
+        // breakpoint
+        int setAllBreakpoint();
+        int p_setBreakpoint(reg_t break_point);
+        bool checkBreakpoint(reg_t break_point);
         int recoverBeackpoint(struct user_regs_struct regs);
-        int setAllBreakpoin();
-        int disasm(int instructionsCount, reg_t addr);
-        int dump(reg_t addr);
+
+        // elf
+        bool checkAddrInTextRange(reg_t addr);
+        int readELF(string program);
+
+        // dump
         reg_t peek_code(reg_t addr);
         int peek_byte_code(reg_t addr, reg_t code);
         reg_t peek_breakpoint_code(reg_t addr);
-        bool checkAddrInTextRange(reg_t addr);
+        
     public:
         Debugger(char * script, char* program);
         ~Debugger();
         
         int runByStdin();
         int runByScript();
+
+        // instruction
+        int setBreakpoint(reg_t break_point);
+        int cont();
+        int deleteBreakpoint(int idx);
+        int disasm(int instructionsCount, reg_t addr);
+        int dump(reg_t addr);
+        // exit()
+        int getReg(struct user_regs_struct *regs);
+        int getRegs();
+        int help();
+        int list();
+        int loadProgram(string program);
+        int run();
+        int show_vmmap();
+        int setReg(char* target, char* val);
+        int step();
+        int start();
 };
 
 

@@ -1,11 +1,7 @@
 load sample/hello64
 start
-disasm 0x4000b0
 b 0x4000b5
-b 0x4000ba
-cont
+l
 getregs
 dump 0x4000b0
-si
-getregs
-dump 0x4000b0
+disasm 0x4000b0

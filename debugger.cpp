@@ -77,33 +77,11 @@ int Debugger::doCommand(std::vector<std::string> *cmds)
     }
     else if (strcmp("start", cmd) == 0)
     {
-        if (getStates() == LoadedStates)
-        {
-            // printf("** pid %d\n", m_child_pid);
-            if (loadProgram(m_program) != 0) errquit("**loadProgram");
-        }
-        else
-        {
-            printf(MSG_MUST_LOADED_STATES);
-        }
+        start();
     }
     else if (strcmp("run", cmd) == 0 || strcmp("r", cmd) == 0)
     {
-        if (getStates() == RunningStates)
-        {
-            printf("** program %s is already running\n", m_program.c_str());
-            cont();
-        }
-        else if (getStates() == LoadedStates)
-        {
-            printf("** run program '%s'\n", m_program.c_str());
-            if (loadProgram(m_program) != 0) errquit("**loadProgram");
-            cont();
-        }
-        else
-        {
-            printf(MSG_MUST_RUNNING_OR_LOADED);
-        }
+        run();
     }
     else if (strcmp("cont", cmd) == 0 || strcmp("c", cmd) == 0)
     {
@@ -188,7 +166,7 @@ int Debugger::doCommand(std::vector<std::string> *cmds)
             }
             char* idx_str = (char *)cmds->at(1).c_str();
             unsigned long idx = convertStr2ul(idx_str);
-            deleteBreak((int)idx);
+            deleteBreakpoint((int)idx);
         }
         else
         {
@@ -235,7 +213,7 @@ int Debugger::doCommand(std::vector<std::string> *cmds)
             }
             char* break_point = (char *)cmds->at(1).c_str();
             reg_t break_val = convertStr2ul(break_point);
-            setBreakPoint(break_val);
+            setBreakpoint(break_val);
         }
         else
         {
@@ -268,7 +246,7 @@ int Debugger::doCommand(std::vector<std::string> *cmds)
     }
     else if(strcmp("help", cmd) == 0 || strcmp("h", cmd) == 0)
     {
-        printf(HELP_MGS);
+        help();
     }
     else
     {
@@ -444,7 +422,7 @@ int Debugger::loadProgram(string program)
         if(waitpid(m_child_pid, &m_wait_status, 0) < 0) errquit("** waitpid");
         ptrace(PTRACE_SETOPTIONS, m_child_pid, 0, PTRACE_O_EXITKILL);
     }
-    setAllBreakpoin();
+    setAllBreakpoint();
     setStates(RunningStates);
     return 0;
 }
@@ -547,7 +525,7 @@ int Debugger::dumpCodeASCII(reg_t addr) {
     return 0;
 }
 
-int Debugger::setBreakPoint(reg_t break_point)
+int Debugger::setBreakpoint(reg_t break_point)
 {
     if (!checkAddrInTextRange(break_point) || break_point == m_elf_info.entry_addr) 
     {
@@ -566,10 +544,7 @@ int Debugger::setBreakPoint(reg_t break_point)
     
     m_breakpoint_addrs.push_back(break_point);
     m_breakpoints[break_point] = original_code;
-
-    char msgCode[MAX_BUF_SIZE];
-    dumpCode(original_code, msgCode);
-    printf("** original_code @ \t 0x%llx: %s\tmov\tebx,1\n", original_code, msgCode);
+    
     /* set break point */
     p_setBreakpoint(break_point);
     return 0;
@@ -581,7 +556,7 @@ int Debugger::p_setBreakpoint(reg_t break_point)
     return 0;
 }
 
-int Debugger::deleteBreak(int idx)
+int Debugger::deleteBreakpoint(int idx)
 {
     if (idx < 0 || idx >= (int)m_breakpoint_addrs.size())
     {
@@ -883,11 +858,10 @@ unsigned long Debugger::disassemble(pid_t proc, unsigned long long rip) {
 	unsigned long long ptr = rip;
 	cs_insn *insn;
 	map<long long, instruction>::iterator mi; // from memory addr to instruction
-
-	if((mi = instructions.find(rip)) != instructions.end()) {
-		print_instruction(rip, &mi->second);
-        return mi->second.size;
-	}
+	// if((mi = instructions.find(rip)) != instructions.end()) {
+	// 	print_instruction(rip, &mi->second);
+    //     return mi->second.size;
+	// }
     
 	for(ptr = rip; ptr < rip + sizeof(buf); ptr += PEEKSIZE) {
 		reg_t peek;
@@ -986,12 +960,52 @@ bool Debugger::checkAddrInTextRange(reg_t addr)
     return false;
 }
 
-int Debugger::setAllBreakpoin()
+int Debugger::setAllBreakpoint()
 {
     for( map<reg_t,reg_t>::iterator iter=m_breakpoints.begin(); iter!=m_breakpoints.end(); ++iter)  
     {  
         auto beackAddr = (*iter).first;
         p_setBreakpoint(beackAddr);
+    }
+    return 0;
+}
+
+int Debugger::help()
+{
+    printf(HELP_MGS);
+    return 0;
+}
+
+int Debugger::run()
+{
+    if (getStates() == RunningStates)
+    {
+        printf("** program %s is already running\n", m_program.c_str());
+        cont();
+    }
+    else if (getStates() == LoadedStates)
+    {
+        printf("** run program '%s'\n", m_program.c_str());
+        if (loadProgram(m_program) != 0) errquit("**loadProgram");
+        cont();
+    }
+    else
+    {
+        printf(MSG_MUST_RUNNING_OR_LOADED);
+    }
+    return 0;
+}
+
+int Debugger::start()
+{
+    if (getStates() == LoadedStates)
+    {
+        // printf("** pid %d\n", m_child_pid);
+        if (loadProgram(m_program) != 0) errquit("**loadProgram");
+    }
+    else
+    {
+        printf(MSG_MUST_LOADED_STATES);
     }
     return 0;
 }

@@ -1,15 +1,11 @@
-load sample/hello64
+load ../310551010_hw4/sample/hello64
 start
+disasm 0x4000b0
 b 0x4000b5
-b 0x4000bf
+b 0x4000ba
 cont
-dump 0x4000b0
 getregs
-l
-cont
 dump 0x4000b0
-l
-cont
+si
+getregs
 dump 0x4000b0
-l
-run

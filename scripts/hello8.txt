@@ -1,11 +1,30 @@
 load sample/hello64
 start
-disasm 0x4000b0
-b 0x4000c6
+break
+break 0x4000b5
+b
+b 0x4000b5
 l
+getregs
+dump 0x4000b0
 cont
-set rip 0x4000b0
-cont
+c
+run
+disasm   
+l
+disasm 0x4000b0
+d   
+d 0x4000b0
+dump 
+dump 0x4000b0
+x
+x 0x4000b0
+get rip
+get
+si
+list
+l
+delete
 delete 0
-set rip 0x4000b0
-cont
+load 
+load sample/hello64

@@ -18,6 +18,8 @@ using namespace std;
 #define ELF_32_BIT_TYPE 1
 #define ELF_64_BIT_TYPE 2
 #define GETPOSE printf("** file %s, line %d\n", __FILE__, __LINE__);
+#define BYTE_MASK 0x00000000000000ff 
+#define BREAK_INSTRUCTION 0xcc
 
 // Msg
 #define MSG_MUST_NOT_LOADED_STATES "**states must be NotLoadedStates\n"

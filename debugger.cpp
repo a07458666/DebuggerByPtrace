@@ -597,7 +597,7 @@ int Debugger::setBreakPoint(reg_t break_point)
 int Debugger::p_setBreakpoint(reg_t break_point)
 {
     unsigned long code = peek_code(break_point);
-    if(ptrace(PTRACE_POKETEXT, m_child_pid, break_point, (code & 0xffffffffffffff00) | 0xcc) != 0)
+    if(ptrace(PTRACE_POKETEXT, m_child_pid, break_point, (code & ~BYTE_MASK) | (BREAK_INSTRUCTION & BYTE_MASK)) != 0)
         errquit("** setBreak ptrace(POKETEXT)");
     return 0;
 }
@@ -624,11 +624,13 @@ int Debugger::recoverBeackpoint(struct user_regs_struct regs)
     iter = m_breakpoints.find(regs.rip);
     printf("** recoverBeackpoint %llx\n", regs.rip);
     if(iter != m_breakpoints.end()){
-        reg_t target, code;
+        reg_t target, code, code_memory;
         target = iter->first;
         code = iter->second;
+        code_memory = peek_code(target);
+        reg_t origin_code = ((code & BYTE_MASK) | (code_memory & ~BYTE_MASK));
         /* restore break point */
-        if(ptrace(PTRACE_POKETEXT, m_child_pid, target, code) != 0)
+        if(ptrace(PTRACE_POKETEXT, m_child_pid, target, origin_code) != 0)
             errquit("** ptrace(POKETEXT)");
     }
     return 0;

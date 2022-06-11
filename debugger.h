@@ -27,10 +27,10 @@ using namespace std;
 #define MSG_NO_REG_NAME "** no regName is given\n"
 #define MSG_NO_REG_NAME_OR_VAL "** no regName or regVal\n"
 #define MSG_NO_ADDR "** no address is given\n"
-typedef unsigned long reg_t;
+typedef unsigned long long reg_t;
 
 typedef struct range_s {
-	unsigned long begin, end;
+	reg_t begin, end;
 }	range_t;
 
 typedef struct map_entry_s {
@@ -42,10 +42,10 @@ typedef struct map_entry_s {
 }	map_entry_t;
 
 typedef struct elf_info_s {
-    unsigned long entry_addr;
-    unsigned long text_size;
-    unsigned long text_min_addr;
-    unsigned long text_max_addr;
+    reg_t entry_addr;
+    reg_t text_size;
+    reg_t text_min_addr;
+    reg_t text_max_addr;
 } elf_info_t;
 
 class instruction {
@@ -106,7 +106,7 @@ class Debugger{
         int show_vmmap();
         int load_maps(pid_t pid, std::map<range_t, map_entry_t>& loaded);
         reg_t convertStr2ul(char* val);
-        int checkProgramState(struct user_regs_struct regs);
+        int checkProgramState(reg_t before_rip);
         int bufferToCmds(char *buf, std::vector<std::string> *cmds);
         int readELF(string program);
         States setStates(States newStates);

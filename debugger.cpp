@@ -286,8 +286,7 @@ int Debugger::cont()
     recoverBeackpoint(regs);
     if(ptrace(PTRACE_CONT, m_child_pid,0 ,0) < 0) errquit("**ptrace@cont");
     if(waitpid(m_child_pid, &m_wait_status, 0) < 0) errquit("**waitpid");
-    setStates(RunningStates);
-    checkProgramState(regs);
+    checkProgramState(regs.rip);
     return 0;
 }
 
@@ -299,7 +298,7 @@ int Debugger::step()
     recoverBeackpoint(regs);
     if (ptrace(PTRACE_SINGLESTEP, m_child_pid, 0, 0) < 0) errquit("** ptrace@STEP");
     if (waitpid(m_child_pid, &m_wait_status, 0) < 0) errquit("** setp");
-    checkProgramState(regs);
+    checkProgramState(regs.rip);
     return 0;
 }
 
@@ -309,7 +308,7 @@ int Debugger::list()
     int count = 0;
     for (int i = 0; i < m_breakpoint_addrs.size(); ++i)
     {
-        printf("\t%d: %lx\n",i, m_breakpoint_addrs[i]);
+        printf("  %d: %llx\n",i, m_breakpoint_addrs[i]);
     }
     return 0;
 }
@@ -463,7 +462,7 @@ int Debugger::show_vmmap()
     fprintf(stderr, "** %zu map entries loaded.\n", vmmap.size());
 
     for(vi = vmmap.begin(); vi != vmmap.end(); vi++) {
-        printf("%016lx-%016lx\t%s\t%ld\t%s\n",vi->second.range.begin, vi->second.range.end, vi->second.permStr.c_str(), vi->second.offset, vi->second.name.c_str());
+        printf("%016llx-%016llx\t%s\t%ld\t%s\n",vi->second.range.begin, vi->second.range.end, vi->second.permStr.c_str(), vi->second.offset, vi->second.name.c_str());
     }
     return 0;
 }
@@ -485,8 +484,8 @@ int Debugger::load_maps(pid_t pid, map<range_t, map_entry_t>& loaded) {
 		if(nargs < 6) continue;
 		if((ptr = strchr(args[0], '-')) != NULL) {
 			*ptr = '\0';
-			m.range.begin = strtol(args[0], NULL, 16);
-			m.range.end = strtol(ptr+1, NULL, 16);
+			m.range.begin = strtoul(args[0], NULL, 16);
+			m.range.end = strtoul(ptr+1, NULL, 16);
 		}
 		// m.name = basename(args[5]);
         m.name = args[5]; //full path
@@ -530,7 +529,7 @@ int Debugger::dumpCodeASCII(reg_t addr) {
     reg_t code8 = peek_code(addr + 8);
     reg_t code12 = peek_code(addr + 12);
 
-	printf("\t%lx: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
+	printf("\t0x%llx: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
         addr,
 		((unsigned char *) (&code))[0],
 		((unsigned char *) (&code))[1],
@@ -595,7 +594,7 @@ int Debugger::setBreakPoint(reg_t break_point)
     return 0;
 }
 
-int Debugger::p_setBreakpoint (reg_t break_point)
+int Debugger::p_setBreakpoint(reg_t break_point)
 {
     unsigned long code = peek_code(break_point);
     if(ptrace(PTRACE_POKETEXT, m_child_pid, break_point, (code & 0xffffffffffffff00) | 0xcc) != 0)
@@ -619,22 +618,53 @@ int Debugger::deleteBreak(int idx)
     return 0;
 }
 
-int Debugger::checkProgramState(struct user_regs_struct regs)
+int Debugger::recoverBeackpoint(struct user_regs_struct regs)
+{ 
+    map<reg_t, reg_t>::iterator iter;
+    iter = m_breakpoints.find(regs.rip);
+    printf("** recoverBeackpoint %llx\n", regs.rip);
+    if(iter != m_breakpoints.end()){
+        reg_t target, code;
+        target = iter->first;
+        code = iter->second;
+        /* restore break point */
+        if(ptrace(PTRACE_POKETEXT, m_child_pid, target, code) != 0)
+            errquit("** ptrace(POKETEXT)");
+    }
+    return 0;
+}
+
+
+int Debugger::checkProgramState(reg_t before_rip)
 {
     // printf("** wait_status = %d,  (%x)\n", m_wait_status, m_wait_status);
     if (WIFEXITED(m_wait_status))
     {
         printf("** child process %d terminiated normally (code %x)\n", m_child_pid, m_wait_status);
-        m_states = LoadedStates;
-        if (loadProgram(m_program) != 0) errquit("**loadProgram");
+        // if (loadProgram(m_program) != 0) errquit("**loadProgram");
+        setStates(LoadedStates);
     }
     else if (WIFSTOPPED(m_wait_status))
     {
+        struct user_regs_struct regs;
+        getReg(&regs);
+        map<reg_t, reg_t>::iterator iter_before;
+        iter_before = m_breakpoints.find(before_rip);
+        if(iter_before != m_breakpoints.end()){
+            p_setBreakpoint(iter_before->first);
+		}
         map<reg_t, reg_t>::iterator iter;
         iter = m_breakpoints.find(regs.rip-1);
         if(iter != m_breakpoints.end()){
-            p_setBreakpoint(iter->first);
+            char codeMsg[MAX_BUF_SIZE];
+            dumpCode(iter->second, codeMsg);
+            printf("** breakpoint @ \t 0x%llx: %s\tmov\tebx,1\n", iter->first, codeMsg);
+            /* set registers */
+            regs.rip = regs.rip-1;
+            // regs.rdx = regs.rax;
+            if(ptrace(PTRACE_SETREGS, m_child_pid, 0, &regs) != 0) errquit("ptrace(SETREGS)");
 		}
+        setStates(RunningStates);
         printf("** child process %d stop (code %x)\n", m_child_pid, m_wait_status);
     }
     return 0;
@@ -723,7 +753,7 @@ int Debugger::readELF(string program)
         fseek(pFile, m_elf_header32.e_shoff + m_elf_header32.e_shstrndx * sizeof(Elf32_Shdr), SEEK_SET);
         fread(&m_sh_table32, 1, sizeof(Elf32_Shdr), pFile);
         m_elf_info.entry_addr = (unsigned long)m_elf_header32.e_entry;
-        fprintf(stdout, "** program '%s' loaded. entry point 0x%lx\n", program.c_str(), m_elf_info.entry_addr);
+        fprintf(stdout, "** program '%s' loaded. entry point 0x%llx\n", program.c_str(), m_elf_info.entry_addr);
         char SectNames[MAX_BUF_SIZE] = "";
         if (m_sh_table32.sh_size > MAX_BUF_SIZE) printf("** m_sh_table32.sh_size > MAX_BUF_SIZE\n");
         fseek(pFile, m_sh_table32.sh_offset, SEEK_SET);
@@ -759,7 +789,7 @@ int Debugger::readELF(string program)
         fseek(pFile, m_elf_header64.e_shoff + m_elf_header64.e_shstrndx * sizeof(Elf64_Shdr), SEEK_SET);
         fread(&m_sh_table64, 1, sizeof(Elf64_Shdr), pFile);
         m_elf_info.entry_addr = (unsigned long)m_elf_header64.e_entry;
-        fprintf(stdout, "** program '%s' loaded. entry point 0x%lx\n", program.c_str(), m_elf_info.entry_addr);
+        fprintf(stdout, "** program '%s' loaded. entry point 0x%llx\n", program.c_str(), m_elf_info.entry_addr);
         char SectNames[MAX_BUF_SIZE] = "";
         fseek(pFile, m_sh_table64.sh_offset, SEEK_SET);
         if (m_sh_table64.sh_size > MAX_BUF_SIZE) printf("** m_sh_table64.sh_size > MAX_BUF_SIZE\n");
@@ -793,28 +823,6 @@ int Debugger::readELF(string program)
     if (init_disasm() != 0) errquit("** cshandle");
     setStates(LoadedStates);
     fclose(pFile);
-    return 0;
-}
-
-int Debugger::recoverBeackpoint(struct user_regs_struct regs)
-{ 
-    map<reg_t, reg_t>::iterator iter;
-    iter = m_breakpoints.find(regs.rip-1);
-    if(iter != m_breakpoints.end()){
-        reg_t target, code;
-        target = iter->first;
-        code = iter->second;
-        /* restore break point */
-        if(ptrace(PTRACE_POKETEXT, m_child_pid, target, code) != 0)
-            errquit("** ptrace(POKETEXT)");
-        /* set registers */
-        regs.rip = regs.rip-1;
-        // regs.rdx = regs.rax;
-        if(ptrace(PTRACE_SETREGS, m_child_pid, 0, &regs) != 0) errquit("ptrace(SETREGS)");
-        char codeMsg[MAX_BUF_SIZE];
-        dumpCode(code, codeMsg);
-        printf("** breakpoint @ \t 0x%llx: %s\tmov\tebx,1\n", regs.rip, codeMsg);
-    }
     return 0;
 }
 

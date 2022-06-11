@@ -6,6 +6,7 @@
 #include <sys/user.h>
 #include <iostream>
 #include <cstring>
+#include <ctype.h>
 
 // elf
 #include <fcntl.h>
@@ -15,8 +16,6 @@
 #include "debugger.h"
 
 using namespace std;
-
-#define HELP_MGS "- break {instruction-address}: add a break point\n- cont: continue execution\n- delete {break-point-id}: remove a break point\n- disasm addr: disassemble instructions in a file or a memory region\n- dump addr: dump memory content\n- exit: terminate the debugger\n- get reg: get a single value from a register\n- getregs: show registers\n- help: show this message\n- list: list break points\n- load {path/to/a/program}: load a program\n- run: run the program\n- vmmap: show memory layout\n- set reg val: get a single value to a register\n- si: step into instruction\n- start: start the program and stop at the first instruction\n"
 
 bool operator<(range_t r1, range_t r2) {
 	if(r1.begin < r2.begin && r1.end < r2.end) return true;
@@ -196,7 +195,7 @@ int Debugger::doCommand(std::vector<std::string> *cmds)
             printf(MSG_MUST_RUNNING);
         }
     }
-    else if (strcmp("dump", cmd) == 0)
+    else if (strcmp("dump", cmd) == 0 || strcmp("x", cmd) == 0)
     {
         if (getStates() == RunningStates)
         {
@@ -514,91 +513,71 @@ int Debugger::dumpCode(long code, char *msg) {
     return 0;
 }
 
-char Debugger::char2ASCII(unsigned char c)
-{
-    if (c < 32 || c > 127)
-    {
-        return '.';
-    }
-    return c;
-}
-
 int Debugger::dumpCodeASCII(reg_t addr) {
-    reg_t code = peek_code(addr);
-    reg_t code4 = peek_code(addr + 4);
-    reg_t code8 = peek_code(addr + 8);
-    reg_t code12 = peek_code(addr + 12);
-
-	printf("\t0x%llx: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
-        addr,
-		((unsigned char *) (&code))[0],
-		((unsigned char *) (&code))[1],
-		((unsigned char *) (&code))[2],
-		((unsigned char *) (&code))[3],
-		((unsigned char *) (&code4))[0],
-        ((unsigned char *) (&code4))[1],
-		((unsigned char *) (&code4))[2],
-		((unsigned char *) (&code4))[3],
-		((unsigned char *) (&code8))[0],
-		((unsigned char *) (&code8))[1],
-        ((unsigned char *) (&code8))[2],
-		((unsigned char *) (&code8))[3],
-		((unsigned char *) (&code12))[0],
-		((unsigned char *) (&code12))[1],
-		((unsigned char *) (&code12))[2],
-        ((unsigned char *) (&code12))[3]);
-    printf("  |%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c|\n",
-        char2ASCII(((unsigned char *) (&code))[0]),
-        char2ASCII(((unsigned char *) (&code))[1]),
-        char2ASCII(((unsigned char *) (&code))[2]),
-        char2ASCII(((unsigned char *) (&code))[3]),
-        char2ASCII(((unsigned char *) (&code4))[0]),
-        char2ASCII(((unsigned char *) (&code4))[1]),
-        char2ASCII(((unsigned char *) (&code4))[2]),
-        char2ASCII(((unsigned char *) (&code4))[3]),
-        char2ASCII(((unsigned char *) (&code8))[0]),
-        char2ASCII(((unsigned char *) (&code8))[1]),
-        char2ASCII(((unsigned char *) (&code8))[2]),
-        char2ASCII(((unsigned char *) (&code8))[3]),
-        char2ASCII(((unsigned char *) (&code12))[0]),
-        char2ASCII(((unsigned char *) (&code12))[1]),
-        char2ASCII(((unsigned char *) (&code12))[2]),
-        char2ASCII(((unsigned char *) (&code12))[3])
-        );
+    reg_t code;
+    string msg;
+    printf("0x%llx: ", addr);
+    for (int i = 0; i < 16; i+=4)
+    {
+        code = peek_code(addr + i);
+        for (int j = 0; j < 4; j++)
+        {
+            printf("%02x ",((unsigned char *) (&code))[j]);
+        }
+    }
+    printf(" |");
+    for (int i = 0; i < 16; i+=4)
+    {
+        code = peek_code(addr + i);
+        for (int j = 0; j < 4; j++)
+        {
+            char tmp = (char)((unsigned char *) (&code))[j];
+            if (isprint(tmp))
+            {
+                printf("%c", tmp);
+            }
+            else
+            {
+                printf(".");
+            }
+            
+        }
+    }
+    printf("|\n");
     return 0;
 }
 
 int Debugger::setBreakPoint(reg_t break_point)
 {
-    char msgCode[MAX_BUF_SIZE];
-
-    if (!checkAddrInTextRange(break_point)) return 0;
+    if (!checkAddrInTextRange(break_point) || break_point == m_elf_info.entry_addr) 
+    {
+        printf(MSG_OUT_OF_RANGE);
+        return 0;
+    }
 
     if (m_breakpoints.find(break_point) != m_breakpoints.end())
     {
-        printf("** the breakpoint is already exists.\n");
+        printf(MSG_ALREADY_EXISTS);
         return 0;
     }
 
     reg_t original_code;
-    // fprintf(stderr, "** entry point = 0x%zx, break point = 0x%zx.\n", m_elf_info.entry_addr, break_point);
-    /* get original text: 48 39 d0 */
     original_code = peek_code(break_point);
-
-    // dumpCode(code, msgCode);
-    /* set break point */
-    p_setBreakpoint(break_point);
     
     m_breakpoint_addrs.push_back(break_point);
     m_breakpoints[break_point] = original_code;
+
+    char msgCode[MAX_BUF_SIZE];
+    dumpCode(original_code, msgCode);
+    printf("** original_code @ \t 0x%llx: %s\tmov\tebx,1\n", original_code, msgCode);
+    /* set break point */
+    p_setBreakpoint(break_point);
     return 0;
 }
 
 int Debugger::p_setBreakpoint(reg_t break_point)
 {
-    unsigned long code = peek_code(break_point);
-    if(ptrace(PTRACE_POKETEXT, m_child_pid, break_point, (code & ~BYTE_MASK) | (BREAK_INSTRUCTION & BYTE_MASK)) != 0)
-        errquit("** setBreak ptrace(POKETEXT)");
+    peek_byte_code(break_point, (reg_t)BREAK_INSTRUCTION);
     return 0;
 }
 
@@ -622,16 +601,11 @@ int Debugger::recoverBeackpoint(struct user_regs_struct regs)
 { 
     map<reg_t, reg_t>::iterator iter;
     iter = m_breakpoints.find(regs.rip);
-    printf("** recoverBeackpoint %llx\n", regs.rip);
     if(iter != m_breakpoints.end()){
         reg_t target, code, code_memory;
         target = iter->first;
         code = iter->second;
-        code_memory = peek_code(target);
-        reg_t origin_code = ((code & BYTE_MASK) | (code_memory & ~BYTE_MASK));
-        /* restore break point */
-        if(ptrace(PTRACE_POKETEXT, m_child_pid, target, origin_code) != 0)
-            errquit("** ptrace(POKETEXT)");
+        peek_byte_code(target, code);
     }
     return 0;
 }
@@ -845,14 +819,14 @@ int Debugger::disasm(int instructionsCount, reg_t addr)
     unsigned long offect = 0;
     if (!checkAddrInTextRange(addr))
     {
-        fprintf(stdout, "** the address is out of the range of the text segment\n");
+        fprintf(stdout, MSG_OUT_OF_RANGE);
         return 0;
     }
     for (unsigned long i = 0; i < MAX_DUMP_INSTRUCTIONS; ++i)
     {   
         if (!checkAddrInTextRange(addr + offect))
         {
-            fprintf(stdout, "** the address is out of the range of the text segment\n");
+            fprintf(stdout, MSG_OUT_OF_RANGE);
             break;
         }
         unsigned long ret = disassemble(m_child_pid, addr + offect);
@@ -920,7 +894,7 @@ unsigned long Debugger::disassemble(pid_t proc, unsigned long long rip) {
 		errno = 0;
         if (checkBreakpoint(ptr))
         {
-            peek = m_breakpoints[ptr];
+            peek = peek_breakpoint_code(ptr);
             memcpy(&buf[ptr-rip], &peek, PEEKSIZE);
         }
         else
@@ -963,10 +937,9 @@ unsigned long Debugger::disassemble(pid_t proc, unsigned long long rip) {
 
 int Debugger::dump(reg_t addr)
 {
-    reg_t code, code4, code8, code12;
     if (!checkAddrInTextRange(addr))
     {
-        fprintf(stdout, "** the address is out of the range of the text segment\n");
+        fprintf(stdout, MSG_OUT_OF_RANGE);
         return 0;
     }
     for (int offset = 0; offset < 80; offset += DUMP_SIZE)
@@ -980,6 +953,23 @@ reg_t Debugger::peek_code(reg_t addr)
 {
     reg_t code = ptrace(PTRACE_PEEKTEXT, m_child_pid, addr, 0);
     return code;
+}
+
+int Debugger::peek_byte_code(reg_t addr, reg_t code)
+{
+    reg_t code_memory = peek_code(addr);
+    reg_t code_out = ((code & BYTE_MASK) | (code_memory & ~BYTE_MASK));
+    /* restore break point */
+    if(ptrace(PTRACE_POKETEXT, m_child_pid, addr, code_out) != 0)
+        errquit("** ptrace(POKETEXT)");
+    return code_out;
+}
+
+reg_t Debugger::peek_breakpoint_code(reg_t addr)
+{
+    reg_t breakpoint_code = m_breakpoints[addr];
+    reg_t code_memory = peek_code(addr);
+    return (breakpoint_code & BYTE_MASK) | (code_memory & ~BYTE_MASK);
 }
 
 bool Debugger::checkBreakpoint(reg_t break_point)

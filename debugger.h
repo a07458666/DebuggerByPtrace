@@ -22,6 +22,7 @@ using namespace std;
 #define BREAK_INSTRUCTION 0xcc
 
 // Msg
+#define HELP_MGS "- break {instruction-address}: add a break point\n- cont: continue execution\n- delete {break-point-id}: remove a break point\n- disasm addr: disassemble instructions in a file or a memory region\n- dump addr: dump memory content\n- exit: terminate the debugger\n- get reg: get a single value from a register\n- getregs: show registers\n- help: show this message\n- list: list break points\n- load {path/to/a/program}: load a program\n- run: run the program\n- vmmap: show memory layout\n- set reg val: get a single value to a register\n- si: step into instruction\n- start: start the program and stop at the first instruction\n"
 #define MSG_MUST_NOT_LOADED_STATES "**states must be NotLoadedStates\n"
 #define MSG_MUST_LOADED_STATES "** states must be LoadedStates\n"
 #define MSG_MUST_RUNNING_OR_LOADED "** states must be RunningStates or LoadedStates\n"
@@ -29,6 +30,8 @@ using namespace std;
 #define MSG_NO_REG_NAME "** no regName is given\n"
 #define MSG_NO_REG_NAME_OR_VAL "** no regName or regVal\n"
 #define MSG_NO_ADDR "** no address is given\n"
+#define MSG_OUT_OF_RANGE  "** the address is out of the range of the text segment\n"
+#define MSG_ALREADY_EXISTS "** the breakpoint is already exists.\n"
 typedef unsigned long long reg_t;
 
 typedef struct range_s {
@@ -95,7 +98,6 @@ class Debugger{
         int setReg(char* target, char* val);
         int dumpCode(long code, char* msg);
         int dumpCodeASCII(reg_t addr);
-        char char2ASCII(unsigned char c);
         int doCommand(std::vector<std::string> *cmds);
         int loadProgram(string program);
         int list();
@@ -118,6 +120,8 @@ class Debugger{
         int disasm(int instructionsCount, reg_t addr);
         int dump(reg_t addr);
         reg_t peek_code(reg_t addr);
+        int peek_byte_code(reg_t addr, reg_t code);
+        reg_t peek_breakpoint_code(reg_t addr);
         bool checkAddrInTextRange(reg_t addr);
     public:
         Debugger(char * script, char* program);

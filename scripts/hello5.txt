@@ -1,0 +1,11 @@
+load sample/hello64
+start
+vmmap
+get rip
+run
+vmmap
+start
+get rax
+si
+si
+cont

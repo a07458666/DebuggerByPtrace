@@ -1,0 +1,15 @@
+load sample/hello64
+start
+b 0x4000b5
+b 0x4000bf
+cont
+dump 0x4000b0
+getregs
+l
+cont
+dump 0x4000b0
+l
+cont
+dump 0x4000b0
+l
+run
